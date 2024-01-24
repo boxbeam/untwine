@@ -37,14 +37,18 @@ struct ParserDef {
 enum ParserPattern {
     Literal(StringLiteral),
     CharRange(CharRange),
+    ParserRef(Ident),
+    Labeled(Box<LabeledPattern>),
 }
 
 impl Parse for ParserPattern {
     fn parse(input: ParseStream) -> Result<Self> {
         input
-            .parse::<StringLiteral>()
+            .parse()
             .map(ParserPattern::Literal)
-            .or_else(|_| input.parse::<CharRange>().map(ParserPattern::CharRange))
+            .or_else(|_| input.parse().map(ParserPattern::CharRange))
+            .or_else(|_| input.parse().map(ParserPattern::ParserRef))
+            .or_else(|_| input.parse().map(|v| ParserPattern::Labeled(Box::new(v))))
     }
 }
 
@@ -99,6 +103,20 @@ impl Parse for ParserDef {
             arrow: input.parse()?,
             return_type: input.parse()?,
         })
+    }
+}
+
+struct LabeledPattern {
+    label: Ident,
+    pattern: ParserPattern,
+}
+
+impl Parse for LabeledPattern {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let label = input.parse()?;
+        input.parse::<Token![:]>()?;
+        let pattern = input.parse()?;
+        Ok(LabeledPattern { label, pattern })
     }
 }
 
