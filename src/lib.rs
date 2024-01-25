@@ -9,6 +9,7 @@ use syn::{
     parse::{discouraged::Speculative, Parse, ParseStream},
     parse_macro_input,
     token::{Bracket, Paren},
+    visit::Visit,
     Block, Ident, Lit, LitChar, LitStr, MacroDelimiter, Result, Token, Type,
 };
 
@@ -245,9 +246,23 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
     }
 }
 
+#[derive(Default)]
+struct IdentVisitor(Vec<Ident>);
+
+impl<'ast> Visit<'ast> for IdentVisitor {
+    fn visit_ident(&mut self, i: &'ast Ident) {
+        self.0.push(i.clone());
+    }
+}
+
 #[proc_macro]
 pub fn parser(input: TokenStream) -> TokenStream {
     let header: ParserBlock = parse_macro_input!(input as ParserBlock);
+    for parser in &header.parsers {
+        let mut visitor = IdentVisitor::default();
+        visitor.visit_block(&parser.block);
+        let IdentVisitor(idents) = visitor;
+    }
     println!("{header:#?}");
     quote! {}.into()
 }
