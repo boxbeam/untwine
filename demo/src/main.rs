@@ -5,7 +5,7 @@ struct MyContext {}
 fn main() {
     parser! {
         [ctx: MyContext]
-        digit: (a | b) -> i32 {}
+        digit: ("a" "b" "c")? -> i32 {}
     }
     println!("Hello, world!");
 }

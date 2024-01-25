@@ -43,7 +43,6 @@ impl Parse for ParserBlock {
             header: optional(input),
             parsers: list(input, false)?,
         };
-        println!("We parsed fully: {:#?}", block);
         Ok(block)
     }
 }
@@ -53,7 +52,7 @@ struct ParserDef {
     public: Option<Token![pub]>,
     name: Ident,
     colon: Token![:],
-    patterns: Vec<Pattern>,
+    patterns: PatternList,
     arrow: Token![->],
     return_type: Type,
     block: Block,
@@ -61,15 +60,16 @@ struct ParserDef {
 
 impl Parse for ParserDef {
     fn parse(input: ParseStream) -> Result<Self> {
-        Ok(ParserDef {
+        let ret = Ok(ParserDef {
             public: input.parse()?,
             name: input.parse()?,
             colon: input.parse()?,
-            patterns: list(input, true)?,
+            patterns: input.parse()?,
             arrow: input.parse()?,
             return_type: input.parse()?,
             block: input.parse()?,
-        })
+        });
+        ret
     }
 }
 
@@ -176,36 +176,33 @@ impl Parse for LabeledPattern {
 
 #[derive(Debug)]
 enum NestedPatterns {
-    Choice(PatternList),
     List(PatternList),
+    Choices(Vec<PatternList>),
 }
 
 impl Parse for NestedPatterns {
     fn parse(input: ParseStream) -> Result<Self> {
         let content;
         parenthesized!(content in input);
-        let choice_fork = content.fork();
-        content.span().source_text();
-        if let Ok(patterns) = delimited_list::<_, Token![|]>(&content, true) {
-            content.advance_to(&choice_fork);
-            let list = PatternList { patterns };
-            return Ok(NestedPatterns::Choice(list));
+        let patterns: PatternList = content.parse()?;
+        if !content.peek(Token![|]) {
+            return Ok(NestedPatterns::List(patterns));
         }
-        let patterns = content.parse()?;
-        Ok(NestedPatterns::List(patterns))
+        let mut choices: Vec<PatternList> = vec![patterns];
+        while content.peek(Token![|]) {
+            content.parse::<Token![|]>()?;
+            choices.push(content.parse()?);
+        }
+        Ok(NestedPatterns::Choices(choices))
     }
 }
 
 #[derive(Debug)]
-struct PatternList {
-    patterns: Vec<Pattern>,
-}
+struct PatternList(Vec<Pattern>);
 
 impl Parse for PatternList {
     fn parse(input: ParseStream) -> Result<Self> {
-        Ok(PatternList {
-            patterns: list(&input, true)?,
-        })
+        Ok(PatternList(list(&input, true)?))
     }
 }
 
@@ -218,52 +215,29 @@ enum Modifier {
 
 impl Parse for Modifier {
     fn parse(input: ParseStream) -> Result<Self> {
-        input
-            .parse::<Token![+]>()
-            .map(|_| Modifier::Repeating)
-            .or_else(|_| input.parse::<Token![?]>().map(|_| Modifier::Optional))
-            .or_else(|_| {
-                input
-                    .parse::<Token![*]>()
-                    .map(|_| Modifier::OptionalRepeating)
-            })
+        if input.parse::<Option<Token![+]>>()?.is_some() {
+            Ok(Modifier::Repeating)
+        } else if input.parse::<Option<Token![?]>>()?.is_some() {
+            Ok(Modifier::Optional)
+        } else if input.parse::<Option<Token![*]>>()?.is_some() {
+            Ok(Modifier::OptionalRepeating)
+        } else {
+            Err(input.error("expected modifier"))
+        }
     }
 }
 
 fn list<T: Parse>(input: ParseStream, require: bool) -> Result<Vec<T>> {
-    println!("Hi");
     let mut vec = vec![];
     if require {
         vec.push(input.parse()?);
     }
     loop {
         let fork = input.fork();
-        let Ok(val) = input.parse() else {
+        let Ok(val) = fork.parse() else {
             break;
         };
         vec.push(val);
-        input.advance_to(&fork);
-    }
-    Ok(vec)
-}
-
-fn delimited_list<T: Parse, D: Parse>(input: ParseStream, require: bool) -> Result<Vec<T>> {
-    let mut vec = vec![];
-    match (input.parse(), require) {
-        (Ok(v), _) => {
-            vec.push(v);
-        }
-        (Err(e), true) => return Err(e),
-        (Err(_), false) => return Ok(vec),
-    }
-    loop {
-        let fork = input.fork();
-        let Ok(_) = fork.parse::<D>() else {
-            break;
-        };
-        input.advance_to(&fork);
-        let elem = fork.parse()?;
-        vec.push(elem);
         input.advance_to(&fork);
     }
     Ok(vec)
@@ -283,7 +257,6 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 #[proc_macro]
 pub fn parser(input: TokenStream) -> TokenStream {
     let header: ParserBlock = parse_macro_input!(input as ParserBlock);
-    println!("???????????????????????????????????????");
     println!("{header:#?}");
     quote! {}.into()
 }
