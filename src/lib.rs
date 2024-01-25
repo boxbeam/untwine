@@ -2,12 +2,13 @@
 use std::ops::RangeInclusive;
 
 use proc_macro::TokenStream;
+use proc_macro2::Span;
 use quote::quote;
 use syn::{
     bracketed, custom_keyword, parenthesized,
     parse::{discouraged::Speculative, Parse, ParseStream},
     parse_macro_input,
-    token::Paren,
+    token::{Bracket, Paren},
     Block, Ident, Lit, LitChar, LitStr, MacroDelimiter, Result, Token, Type,
 };
 
@@ -39,7 +40,7 @@ struct ParserBlock {
 impl Parse for ParserBlock {
     fn parse(input: ParseStream) -> Result<Self> {
         let block = ParserBlock {
-            header: input.parse().ok(),
+            header: optional(input),
             parsers: list(input, false)?,
         };
         println!("We parsed fully: {:#?}", block);
@@ -91,20 +92,26 @@ impl Parse for Pattern {
     fn parse(input: ParseStream) -> Result<Self> {
         Ok(Pattern {
             fragment: input.parse()?,
-            modifier: input.parse().ok(),
+            modifier: optional(input),
         })
     }
 }
 
 impl Parse for PatternFragment {
     fn parse(input: ParseStream) -> Result<Self> {
-        input
-            .parse()
-            .map(PatternFragment::Nested)
-            .or_else(|_| input.parse().map(PatternFragment::CharRange))
-            .or_else(|_| input.parse().map(|v| PatternFragment::Labeled(Box::new(v))))
-            .or_else(|_| input.parse().map(PatternFragment::Nested))
-            .or_else(|_| input.parse().map(PatternFragment::ParserRef))
+        if input.peek(Bracket) {
+            input.parse().map(PatternFragment::CharRange)
+        } else if input.peek(LitStr) || input.peek(kw::i) {
+            input.parse().map(PatternFragment::Literal)
+        } else if input.peek(Paren) {
+            input.parse().map(PatternFragment::Nested)
+        } else if input.peek(Ident) && input.peek2(Token![=]) {
+            input.parse().map(|v| PatternFragment::Labeled(Box::new(v)))
+        } else if input.peek(Ident) {
+            input.parse().map(PatternFragment::ParserRef)
+        } else {
+            Err(input.error("expected pattern fragment"))
+        }
     }
 }
 
@@ -160,12 +167,10 @@ struct LabeledPattern {
 
 impl Parse for LabeledPattern {
     fn parse(input: ParseStream) -> Result<Self> {
-        scoped(input, |input| {
-            let label = input.parse()?;
-            input.parse::<Token![=]>()?;
-            let pattern = input.parse()?;
-            Ok(LabeledPattern { label, pattern })
-        })
+        let label = input.parse()?;
+        input.parse::<Token![=]>()?;
+        let pattern = input.parse()?;
+        Ok(LabeledPattern { label, pattern })
     }
 }
 
@@ -225,26 +230,24 @@ impl Parse for Modifier {
     }
 }
 
-fn list<T: Parse + std::fmt::Debug>(input: ParseStream, require: bool) -> Result<Vec<T>> {
+fn list<T: Parse>(input: ParseStream, require: bool) -> Result<Vec<T>> {
+    println!("Hi");
     let mut vec = vec![];
     if require {
         vec.push(input.parse()?);
     }
     loop {
-        // let fork = input.fork();
+        let fork = input.fork();
         let Ok(val) = input.parse() else {
             break;
         };
         vec.push(val);
-        // input.advance_to(&fork);
+        input.advance_to(&fork);
     }
     Ok(vec)
 }
 
-fn delimited_list<T: Parse + std::fmt::Debug, D: Parse>(
-    input: ParseStream,
-    require: bool,
-) -> Result<Vec<T>> {
+fn delimited_list<T: Parse, D: Parse>(input: ParseStream, require: bool) -> Result<Vec<T>> {
     let mut vec = vec![];
     match (input.parse(), require) {
         (Ok(v), _) => {
@@ -258,6 +261,7 @@ fn delimited_list<T: Parse + std::fmt::Debug, D: Parse>(
         let Ok(_) = fork.parse::<D>() else {
             break;
         };
+        input.advance_to(&fork);
         let elem = fork.parse()?;
         vec.push(elem);
         input.advance_to(&fork);
@@ -265,14 +269,15 @@ fn delimited_list<T: Parse + std::fmt::Debug, D: Parse>(
     Ok(vec)
 }
 
-/// An operation which parses multiple values but may fail partway through can leave
-/// the parser head at an invalid location. Use this to make the operation fail or
-/// succeed completely.
-fn scoped<T>(input: ParseStream, parser: impl FnOnce(ParseStream) -> Result<T>) -> Result<T> {
-    let newinput = input.fork();
-    let val = parser(&newinput)?;
-    input.advance_to(&newinput);
-    Ok(val)
+fn optional<T: Parse>(input: ParseStream) -> Option<T> {
+    let fork = input.fork();
+    match fork.parse() {
+        Ok(val) => {
+            input.advance_to(&fork);
+            Some(val)
+        }
+        Err(_) => None,
+    }
 }
 
 #[proc_macro]
