@@ -79,7 +79,7 @@ enum PatternFragment {
     CharRange(CharRange),
     ParserRef(Ident),
     Labeled(Box<LabeledPattern>),
-    Nested(NestedPatterns),
+    Nested(PatternList),
 }
 
 #[derive(Debug)]
@@ -104,7 +104,9 @@ impl Parse for PatternFragment {
         } else if input.peek(LitStr) || input.peek(kw::i) {
             input.parse().map(PatternFragment::Literal)
         } else if input.peek(Paren) {
-            input.parse().map(PatternFragment::Nested)
+            let content;
+            parenthesized!(content in input);
+            content.parse().map(PatternFragment::Nested)
         } else if input.peek(Ident) && input.peek2(Token![=]) {
             input.parse().map(|v| PatternFragment::Labeled(Box::new(v)))
         } else if input.peek(Ident) {
@@ -175,34 +177,23 @@ impl Parse for LabeledPattern {
 }
 
 #[derive(Debug)]
-enum NestedPatterns {
-    List(PatternList),
-    Choices(Vec<PatternList>),
+enum PatternList {
+    List(Vec<Pattern>),
+    Choices(Vec<Vec<Pattern>>),
 }
-
-impl Parse for NestedPatterns {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let content;
-        parenthesized!(content in input);
-        let patterns: PatternList = content.parse()?;
-        if !content.peek(Token![|]) {
-            return Ok(NestedPatterns::List(patterns));
-        }
-        let mut choices: Vec<PatternList> = vec![patterns];
-        while content.peek(Token![|]) {
-            content.parse::<Token![|]>()?;
-            choices.push(content.parse()?);
-        }
-        Ok(NestedPatterns::Choices(choices))
-    }
-}
-
-#[derive(Debug)]
-struct PatternList(Vec<Pattern>);
 
 impl Parse for PatternList {
     fn parse(input: ParseStream) -> Result<Self> {
-        Ok(PatternList(list(&input, true)?))
+        let patterns: Vec<Pattern> = list(input, true)?;
+        if !input.peek(Token![|]) {
+            return Ok(PatternList::List(patterns));
+        }
+        let mut choices: Vec<Vec<Pattern>> = vec![patterns];
+        while input.peek(Token![|]) {
+            input.parse::<Token![|]>()?;
+            choices.push(list(input, true)?);
+        }
+        Ok(PatternList::Choices(choices))
     }
 }
 
