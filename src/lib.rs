@@ -6,7 +6,9 @@ use quote::quote;
 use syn::{
     bracketed, custom_keyword, parenthesized,
     parse::{discouraged::Speculative, Parse, ParseStream},
-    parse_macro_input, Block, Ident, Lit, LitChar, LitStr, Result, Token, Type,
+    parse_macro_input,
+    token::Paren,
+    Block, Ident, Lit, LitChar, LitStr, MacroDelimiter, Result, Token, Type,
 };
 
 #[derive(Debug)]
@@ -36,10 +38,12 @@ struct ParserBlock {
 
 impl Parse for ParserBlock {
     fn parse(input: ParseStream) -> Result<Self> {
-        Ok(ParserBlock {
+        let block = ParserBlock {
             header: input.parse().ok(),
             parsers: list(input, false)?,
-        })
+        };
+        println!("We parsed fully: {:#?}", block);
+        Ok(block)
     }
 }
 
@@ -74,8 +78,7 @@ enum PatternFragment {
     CharRange(CharRange),
     ParserRef(Ident),
     Labeled(Box<LabeledPattern>),
-    Nested(NestedPatternList),
-    Choice(PatternChoiceList),
+    Nested(NestedPatterns),
 }
 
 #[derive(Debug)]
@@ -97,10 +100,9 @@ impl Parse for PatternFragment {
     fn parse(input: ParseStream) -> Result<Self> {
         input
             .parse()
-            .map(PatternFragment::Literal)
+            .map(PatternFragment::Nested)
             .or_else(|_| input.parse().map(PatternFragment::CharRange))
             .or_else(|_| input.parse().map(|v| PatternFragment::Labeled(Box::new(v))))
-            .or_else(|_| input.parse().map(PatternFragment::Choice))
             .or_else(|_| input.parse().map(PatternFragment::Nested))
             .or_else(|_| input.parse().map(PatternFragment::ParserRef))
     }
@@ -159,44 +161,45 @@ struct LabeledPattern {
 impl Parse for LabeledPattern {
     fn parse(input: ParseStream) -> Result<Self> {
         scoped(input, |input| {
-            Ok(LabeledPattern {
-                label: input.parse()?,
-                pattern: input.parse()?,
-            })
+            let label = input.parse()?;
+            input.parse::<Token![=]>()?;
+            let pattern = input.parse()?;
+            Ok(LabeledPattern { label, pattern })
         })
     }
 }
 
 #[derive(Debug)]
-struct NestedPatternList {
-    patterns: Vec<Pattern>,
+enum NestedPatterns {
+    Choice(PatternList),
+    List(PatternList),
 }
 
-impl Parse for NestedPatternList {
+impl Parse for NestedPatterns {
     fn parse(input: ParseStream) -> Result<Self> {
-        scoped(input, |input| {
-            let content;
-            parenthesized!(content in input);
-            Ok(NestedPatternList {
-                patterns: list(&content, true)?,
-            })
-        })
+        let content;
+        parenthesized!(content in input);
+        let choice_fork = content.fork();
+        content.span().source_text();
+        if let Ok(patterns) = delimited_list::<_, Token![|]>(&content, true) {
+            content.advance_to(&choice_fork);
+            let list = PatternList { patterns };
+            return Ok(NestedPatterns::Choice(list));
+        }
+        let patterns = content.parse()?;
+        Ok(NestedPatterns::List(patterns))
     }
 }
 
 #[derive(Debug)]
-struct PatternChoiceList {
+struct PatternList {
     patterns: Vec<Pattern>,
 }
 
-impl Parse for PatternChoiceList {
+impl Parse for PatternList {
     fn parse(input: ParseStream) -> Result<Self> {
-        scoped(input, |input| {
-            let content;
-            parenthesized!(content in input);
-            Ok(PatternChoiceList {
-                patterns: delimited_list::<_, Token![|]>(&content, true)?,
-            })
+        Ok(PatternList {
+            patterns: list(&input, true)?,
         })
     }
 }
@@ -222,34 +225,44 @@ impl Parse for Modifier {
     }
 }
 
-fn list<T: Parse>(input: ParseStream, require: bool) -> Result<Vec<T>> {
-    scoped(input, |input| {
-        let mut vec = vec![];
-        if require {
-            vec.push(input.parse()?);
-        }
-        while let Ok(elem) = input.parse() {
-            vec.push(elem);
-        }
-        Ok(vec)
-    })
+fn list<T: Parse + std::fmt::Debug>(input: ParseStream, require: bool) -> Result<Vec<T>> {
+    let mut vec = vec![];
+    if require {
+        vec.push(input.parse()?);
+    }
+    loop {
+        // let fork = input.fork();
+        let Ok(val) = input.parse() else {
+            break;
+        };
+        vec.push(val);
+        // input.advance_to(&fork);
+    }
+    Ok(vec)
 }
 
-fn delimited_list<T: Parse, D: Parse>(input: ParseStream, require: bool) -> Result<Vec<T>> {
-    scoped(input, |input| {
-        let mut vec = vec![];
-        match (input.parse(), require) {
-            (Ok(v), _) => {
-                vec.push(v);
-            }
-            (Err(e), true) => return Err(e),
-            (Err(_), false) => return Ok(vec),
+fn delimited_list<T: Parse + std::fmt::Debug, D: Parse>(
+    input: ParseStream,
+    require: bool,
+) -> Result<Vec<T>> {
+    let mut vec = vec![];
+    match (input.parse(), require) {
+        (Ok(v), _) => {
+            vec.push(v);
         }
-        while let Ok(_) = input.parse::<D>() {
-            vec.push(input.parse()?);
-        }
-        Ok(vec)
-    })
+        (Err(e), true) => return Err(e),
+        (Err(_), false) => return Ok(vec),
+    }
+    loop {
+        let fork = input.fork();
+        let Ok(_) = fork.parse::<D>() else {
+            break;
+        };
+        let elem = fork.parse()?;
+        vec.push(elem);
+        input.advance_to(&fork);
+    }
+    Ok(vec)
 }
 
 /// An operation which parses multiple values but may fail partway through can leave
@@ -264,6 +277,8 @@ fn scoped<T>(input: ParseStream, parser: impl FnOnce(ParseStream) -> Result<T>) 
 
 #[proc_macro]
 pub fn parser(input: TokenStream) -> TokenStream {
-    let header: ParserBlock = parse_macro_input!(input);
+    let header: ParserBlock = parse_macro_input!(input as ParserBlock);
+    println!("???????????????????????????????????????");
+    println!("{header:#?}");
     quote! {}.into()
 }
