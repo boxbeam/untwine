@@ -16,7 +16,7 @@ use syn::{
 mod type_utils;
 
 #[derive(Debug)]
-struct Header {
+pub(crate) struct Header {
     ctx_name: Ident,
     colon: Token![:],
     ctx_type: Type,
@@ -35,7 +35,7 @@ impl Parse for Header {
 }
 
 #[derive(Debug)]
-struct ParserBlock {
+pub(crate) struct ParserBlock {
     header: Option<Header>,
     parsers: Vec<ParserDef>,
 }
@@ -51,7 +51,7 @@ impl Parse for ParserBlock {
 }
 
 #[derive(Debug)]
-struct ParserDef {
+pub(crate) struct ParserDef {
     public: Option<Token![pub]>,
     name: Ident,
     colon: Token![:],
@@ -77,7 +77,7 @@ impl Parse for ParserDef {
 }
 
 #[derive(Debug)]
-enum PatternFragment {
+pub(crate) enum PatternFragment {
     Literal(StringLiteral),
     CharRange(CharRange),
     ParserRef(Ident),
@@ -86,7 +86,7 @@ enum PatternFragment {
 }
 
 #[derive(Debug)]
-struct Pattern {
+pub(crate) struct Pattern {
     fragment: PatternFragment,
     modifier: Option<Modifier>,
 }
@@ -127,7 +127,7 @@ mod kw {
 }
 
 #[derive(Debug)]
-struct StringLiteral {
+pub(crate) struct StringLiteral {
     case_sensitive: bool,
     string: String,
 }
@@ -144,7 +144,7 @@ impl Parse for StringLiteral {
 }
 
 #[derive(Debug)]
-struct CharRange {
+pub(crate) struct CharRange {
     inverted: bool,
     range: RangeInclusive<char>,
 }
@@ -165,7 +165,7 @@ impl Parse for CharRange {
 }
 
 #[derive(Debug)]
-struct LabeledPattern {
+pub(crate) struct LabeledPattern {
     label: Ident,
     pattern: PatternFragment,
 }
@@ -180,7 +180,7 @@ impl Parse for LabeledPattern {
 }
 
 #[derive(Debug)]
-enum PatternList {
+pub(crate) enum PatternList {
     List(Vec<Pattern>),
     Choices(Vec<Vec<Pattern>>),
 }
@@ -201,7 +201,7 @@ impl Parse for PatternList {
 }
 
 #[derive(Debug)]
-enum Modifier {
+pub(crate) enum Modifier {
     Optional,
     Repeating,
     OptionalRepeating,
