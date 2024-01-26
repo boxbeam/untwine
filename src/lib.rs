@@ -28,26 +28,36 @@ impl AnyStack {
     pub fn stack<T>(&mut self) -> Stack<T> {
         Stack::new(NonNull::new(&mut *self.stack as *mut [u8]).unwrap())
     }
+
+    /// Create an untyped split at the root
+    pub fn any<'a>(&'a mut self) -> AnySplit<'a> {
+        AnySplit {
+            mem: NonNull::new(&mut *self.stack as *mut [u8]).unwrap(),
+            parent_split: None,
+        }
+    }
 }
 
 /// An untyped head of an [AnyStack] which can be split into a [Stack] of any type
 pub struct AnySplit<'a> {
     mem: NonNull<[u8]>,
-    parent_split: &'a Cell<bool>,
+    parent_split: Option<&'a Cell<bool>>,
 }
 
 impl<'a> AnySplit<'a> {
     /// Split a typed stack off the [AnyStack] head.
     pub fn split<T>(self) -> Stack<'a, T> {
         let mut stack = Stack::new(self.mem);
-        stack.parent_split = Some(self.parent_split);
+        stack.parent_split = self.parent_split;
         stack
     }
 }
 
 impl<'a> Drop for AnySplit<'a> {
     fn drop(&mut self) {
-        self.parent_split.replace(false);
+        if let Some(parent_split) = self.parent_split {
+            parent_split.replace(false);
+        }
     }
 }
 
@@ -115,7 +125,7 @@ impl<'a, T> Stack<'a, T> {
     pub fn split_any(&self) -> AnySplit {
         AnySplit {
             mem: self.split_ptr(),
-            parent_split: &self.split,
+            parent_split: Some(&self.split),
         }
     }
 
