@@ -6,6 +6,10 @@ use std::{
 
 pub extern crate macros;
 
+/// A static chunk of memory which you can split stacks off of.
+/// Each stack remains mutable until you split another stack off of it,
+/// and stacks can be of any type. Only one will be mutable at a time,
+/// and you must drop the child of a stack before splitting it again.
 pub struct AnyStack {
     stack: Box<[u8]>,
 }
@@ -17,17 +21,20 @@ impl AnyStack {
         }
     }
 
+    /// Create the root stack
     pub fn stack<T>(&mut self) -> Stack<T> {
         Stack::new(NonNull::new(&mut *self.stack as *mut [u8]).unwrap())
     }
 }
 
+/// An untyped head of an [AnyStack] which can be split into a [Stack] of any type
 pub struct AnySplit<'a> {
     mem: NonNull<[u8]>,
     parent_split: &'a Cell<bool>,
 }
 
 impl<'a> AnySplit<'a> {
+    /// Split a typed stack off the [AnyStack] head.
     pub fn split<T>(self) -> Stack<'a, T> {
         let mut stack = Stack::new(self.mem);
         stack.parent_split = Some(self.parent_split);
@@ -41,6 +48,8 @@ impl<'a> Drop for AnySplit<'a> {
     }
 }
 
+/// The head of an [AnyStack]. Can be treated like a normal stack, dereferences to a slice,
+/// and can be split to create a new stack of any type.
 pub struct Stack<'a, T> {
     mem: NonNull<[u8]>,
     int: &'a mut [T],
@@ -66,6 +75,7 @@ impl<'a, T> DerefMut for Stack<'a, T> {
 
 impl<'a, T> Stack<'a, T> {
     fn new(stack: NonNull<[u8]>) -> Self {
+        // Safe because the stack pointer is known valid for 'a
         let (before, int, _) = unsafe { (*stack.as_ptr()).align_to_mut() };
         Stack {
             mem: stack,
@@ -89,6 +99,8 @@ impl<'a, T> Stack<'a, T> {
         mem
     }
 
+    /// Split off another stack, making this one immutable.
+    /// Cannot split the same stack twice unless the split-off child has been dropped.
     pub fn split<V>(&self) -> Stack<V> {
         let mem = self.split_ptr();
         let mut stack = Stack::new(mem);
@@ -96,6 +108,7 @@ impl<'a, T> Stack<'a, T> {
         stack
     }
 
+    /// Split off the head without any specific stack type, so it can be chosen by the receiver.
     pub fn split_any(&self) -> AnySplit {
         AnySplit {
             mem: self.split_ptr(),
@@ -103,9 +116,27 @@ impl<'a, T> Stack<'a, T> {
         }
     }
 
+    /// Push an element onto the stack.
     pub fn push(&mut self, val: T) {
         self.int[self.len] = val;
         self.len += 1;
+    }
+
+    /// Remove the top element from the stack.
+    pub fn pop(&mut self) -> Option<T> {
+        if self.len == 0 {
+            return None;
+        }
+        // Safe because this data's destructor will never be run and it will never be accessed
+        // again except to overwrite it with valid data
+        let elem = unsafe {
+            std::mem::replace(
+                &mut self.int[self.len],
+                std::mem::MaybeUninit::uninit().assume_init(),
+            )
+        };
+        self.len -= 1;
+        Some(elem)
     }
 }
 
