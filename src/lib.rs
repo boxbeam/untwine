@@ -1,16 +1,16 @@
 use std::{
     cell::Cell,
-    marker::PhantomData,
     ops::{Deref, DerefMut},
+    ptr::NonNull,
 };
 
 pub extern crate macros;
 
-pub struct UniversalStack {
+pub struct AnyStack {
     stack: Box<[u8]>,
 }
 
-impl UniversalStack {
+impl AnyStack {
     pub fn new(capacity: usize) -> Self {
         Self {
             stack: vec![0; capacity].into_boxed_slice(),
@@ -18,15 +18,34 @@ impl UniversalStack {
     }
 
     pub fn stack<T>(&mut self) -> Stack<T> {
-        Stack::new(&mut *self.stack as *mut [u8])
+        Stack::new(NonNull::new(&mut *self.stack as *mut [u8]).unwrap())
+    }
+}
+
+pub struct AnySplit<'a> {
+    mem: NonNull<[u8]>,
+    parent_split: &'a Cell<bool>,
+}
+
+impl<'a> AnySplit<'a> {
+    pub fn split<T>(self) -> Stack<'a, T> {
+        let mut stack = Stack::new(self.mem);
+        stack.parent_split = Some(self.parent_split);
+        stack
+    }
+}
+
+impl<'a> Drop for AnySplit<'a> {
+    fn drop(&mut self) {
+        self.parent_split.replace(false);
     }
 }
 
 pub struct Stack<'a, T> {
-    mem: *mut [u8],
+    mem: NonNull<[u8]>,
     int: &'a mut [T],
     len: usize,
-    phantom: PhantomData<T>,
+    skip_bytes: usize,
     split: Cell<bool>,
     parent_split: Option<&'a Cell<bool>>,
 }
@@ -46,33 +65,42 @@ impl<'a, T> DerefMut for Stack<'a, T> {
 }
 
 impl<'a, T> Stack<'a, T> {
-    fn new(stack: *mut [u8]) -> Self {
-        unsafe {
-            let (_, int, _) = (*stack).align_to_mut();
-            Stack {
-                mem: stack,
-                int,
-                len: 0,
-                phantom: PhantomData,
-                split: Default::default(),
-                parent_split: None,
-            }
+    fn new(stack: NonNull<[u8]>) -> Self {
+        let (before, int, _) = unsafe { (*stack.as_ptr()).align_to_mut() };
+        Stack {
+            mem: stack,
+            int,
+            len: 0,
+            skip_bytes: before.len(),
+            split: Default::default(),
+            parent_split: None,
         }
     }
 
-    pub fn split<V>(&self) -> Stack<V> {
+    fn split_ptr(&self) -> NonNull<[u8]> {
         if self.split.get() {
             panic!("Stack was split from twice");
         }
-        self.split.replace(true);
-        let pos = (std::mem::size_of::<T>() * self.len) + std::mem::align_of::<T>();
+        let pos = (std::mem::size_of::<T>() * self.len) + self.skip_bytes;
         // Safe because the [u8] is only stored behind a pointer instead of a reference
         // because the &mut [T] is an alias to the same data, but rust has no way of knowing that.
         // This just prevents it from "looking like" there are two mutable borrows of the same data.
-        let mem = unsafe { (*self.mem).split_at_mut(pos).1 };
-        let mut stack = Stack::new(mem as *mut _);
+        let mem = unsafe { NonNull::new_unchecked((*self.mem.as_ptr()).split_at_mut(pos).1) };
+        mem
+    }
+
+    pub fn split<V>(&self) -> Stack<V> {
+        let mem = self.split_ptr();
+        let mut stack = Stack::new(mem);
         stack.parent_split = Some(&self.split);
         stack
+    }
+
+    pub fn split_any(&self) -> AnySplit {
+        AnySplit {
+            mem: self.split_ptr(),
+            parent_split: &self.split,
+        }
     }
 
     pub fn push(&mut self, val: T) {
@@ -83,15 +111,12 @@ impl<'a, T> Stack<'a, T> {
 
 impl<'a, T> Drop for Stack<'a, T> {
     fn drop(&mut self) {
-        for t in &mut *self.int {
+        for t in &mut **self {
             // Safe because this &mut [T] is constructed by casting a &mut [u8],
             // which means the destructors would not be run normally.
             // When this is dropped, we need to manually run the destructors.
             unsafe {
-                drop(std::mem::replace(
-                    t,
-                    std::mem::MaybeUninit::uninit().assume_init(),
-                ));
+                std::ptr::drop_in_place(t as *mut _);
             }
         }
         if let Some(parent_split) = self.parent_split {
@@ -106,7 +131,7 @@ mod tests {
 
     #[test]
     fn test_universal_stack() {
-        let mut a = UniversalStack::new(1000);
+        let mut a = AnyStack::new(1000);
         let mut stack: Stack<i32> = a.stack();
         stack.push(1);
         let mut stack_2 = stack.split();
@@ -119,7 +144,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_multi_split() {
-        let mut stack = UniversalStack::new(1000);
+        let mut stack = AnyStack::new(1000);
         let first = stack.stack::<i32>();
         let mut second = first.split::<i32>();
         let mut third = first.split::<i32>();
@@ -129,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_multi_split_scope() {
-        let mut stack = UniversalStack::new(1000);
+        let mut stack = AnyStack::new(1000);
         let first = stack.stack::<i32>();
         {
             let mut split = first.split::<i32>();

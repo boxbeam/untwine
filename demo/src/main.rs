@@ -1,4 +1,4 @@
-use untwine::parser;
+use untwine::macros::parser;
 
 fn main() {
     parser! {
