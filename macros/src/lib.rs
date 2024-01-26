@@ -101,7 +101,7 @@ impl Parse for Pattern {
 
 impl Parse for PatternFragment {
     fn parse(input: ParseStream) -> Result<Self> {
-        if input.peek(Bracket) {
+        if input.peek(LitChar) {
             input.parse().map(PatternFragment::CharRange)
         } else if input.peek(LitStr) || input.peek(kw::i) {
             input.parse().map(PatternFragment::Literal)
@@ -150,12 +150,10 @@ pub(crate) struct CharRange {
 
 impl Parse for CharRange {
     fn parse(input: ParseStream) -> Result<Self> {
-        let content;
-        bracketed!(content in input);
-        let inverted: Option<Token![^]> = content.parse()?;
-        let begin: LitChar = content.parse()?;
-        content.parse::<Token![-]>()?;
-        let end: LitChar = content.parse()?;
+        let inverted: Option<Token![^]> = input.parse()?;
+        let begin: LitChar = input.parse()?;
+        input.parse::<Token![-]>()?;
+        let end: LitChar = input.parse()?;
         Ok(CharRange {
             inverted: inverted.is_some(),
             range: begin.value()..=end.value(),

@@ -46,7 +46,7 @@ pub struct AnySplit<'a> {
 
 impl<'a> AnySplit<'a> {
     /// Split a typed stack off the [AnyStack] head.
-    pub fn split<T>(self) -> Stack<'a, T> {
+    pub fn stack<T>(self) -> Stack<'a, T> {
         let mut stack = Stack::new(self.mem);
         stack.parent_split = self.parent_split;
         stack
@@ -114,7 +114,7 @@ impl<'a, T> Stack<'a, T> {
 
     /// Split off another stack, making this one immutable.
     /// Cannot split the same stack twice unless the split-off child has been dropped.
-    pub fn split<V>(&self) -> Stack<V> {
+    pub fn stack<V>(&self) -> Stack<V> {
         let mem = self.split_ptr();
         let mut stack = Stack::new(mem);
         stack.parent_split = Some(&self.split);
@@ -178,7 +178,7 @@ mod tests {
         let mut a = AnyStack::new(1000);
         let mut stack: Stack<i32> = a.stack();
         stack.push(1);
-        let mut stack_2 = stack.split();
+        let mut stack_2 = stack.stack();
         stack_2.push("Hello".to_string());
 
         assert_eq!(&*stack, &[1]);
@@ -190,8 +190,8 @@ mod tests {
     fn test_multi_split() {
         let mut stack = AnyStack::new(1000);
         let first = stack.stack::<i32>();
-        let mut second = first.split::<i32>();
-        let mut third = first.split::<i32>();
+        let mut second = first.stack::<i32>();
+        let mut third = first.stack::<i32>();
         second.push(1);
         third.push(1);
     }
@@ -201,9 +201,9 @@ mod tests {
         let mut stack = AnyStack::new(1000);
         let first = stack.stack::<i32>();
         {
-            let mut split = first.split::<i32>();
+            let mut split = first.stack::<i32>();
             split.push(1);
         }
-        first.split::<i32>();
+        first.stack::<i32>();
     }
 }
