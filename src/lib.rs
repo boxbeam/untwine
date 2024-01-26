@@ -13,6 +13,8 @@ use syn::{
     Block, Ident, Lit, LitChar, LitStr, MacroDelimiter, Result, Token, Type,
 };
 
+mod type_utils;
+
 #[derive(Debug)]
 struct Header {
     ctx_name: Ident,
