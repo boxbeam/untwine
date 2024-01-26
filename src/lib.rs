@@ -66,6 +66,9 @@ impl<'a, T> Stack<'a, T> {
         }
         self.split.replace(true);
         let pos = (std::mem::size_of::<T>() * self.len) + std::mem::align_of::<T>();
+        // Safe because the [u8] is only stored behind a pointer instead of a reference
+        // because the &mut [T] is an alias to the same data, but rust has no way of knowing that.
+        // This just prevents it from "looking like" there are two mutable borrows of the same data.
         let mem = unsafe { (*self.mem).split_at_mut(pos).1 };
         let mut stack = Stack::new(mem as *mut _);
         stack.parent_split = Some(&self.split);
@@ -81,6 +84,9 @@ impl<'a, T> Stack<'a, T> {
 impl<'a, T> Drop for Stack<'a, T> {
     fn drop(&mut self) {
         for t in &mut *self.int {
+            // Safe because this &mut [T] is constructed by casting a &mut [u8],
+            // which means the destructors would not be run normally.
+            // When this is dropped, we need to manually run the destructors.
             unsafe {
                 drop(std::mem::replace(
                     t,
