@@ -6,7 +6,7 @@ use std::{
 
 pub extern crate macros;
 
-/// A static chunk of memory which you can split stacks off of.
+/// A fixed-size chunk of memory which you can split stacks off of.
 /// Each stack remains mutable until you split another stack off of it,
 /// and stacks can be of any type. Only one will be mutable at a time,
 /// and you must drop the child of a stack before splitting it again.
@@ -15,6 +15,9 @@ pub struct AnyStack {
 }
 
 impl AnyStack {
+    /// Create a new AnyStack allocator with the given byte capacity.
+    /// This allocates the entire chunk of memory at once, and it can
+    /// never be expanded.
     pub fn new(capacity: usize) -> Self {
         Self {
             stack: vec![0; capacity].into_boxed_slice(),
