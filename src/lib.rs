@@ -1,12 +1,12 @@
 use std::{
     cell::Cell,
     marker::PhantomData,
-    ops::{Deref, DerefMut, Range},
+    ops::{Deref, DerefMut},
 };
 
 pub extern crate macros;
 
-struct UniversalStack {
+pub struct UniversalStack {
     stack: Box<[u8]>,
 }
 
