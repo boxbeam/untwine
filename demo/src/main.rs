@@ -2,7 +2,9 @@ use untwine::macros::parser;
 
 fn main() {
     parser! {
+        [ctx: Ctx]
         sep: {char::is_whitespace}* -> () {}
+        test: a=(b="hello") -> () {}
         int: <"-"? '0'-'9'+> -> JSONValue { Int(int.parse()?) }
         float: <"-"? '0'-'9'+ ("." '0'-'9'+)?> -> JSONValue { Float(float.parse()?) }
         str_char: <("\\" . | [^"\""])> -> char { str_char.chars().last().unwrap() /* doesn't handle escape seqs properly */ }

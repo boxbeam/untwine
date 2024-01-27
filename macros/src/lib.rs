@@ -44,7 +44,7 @@ impl Parse for ParserBlock {
     fn parse(input: ParseStream) -> Result<Self> {
         let block = ParserBlock {
             header: optional(input),
-            parsers: list(input, false)?,
+            parsers: list(input, false, |i| i.is_empty())?,
         };
         Ok(block)
     }
@@ -89,6 +89,37 @@ pub(crate) enum PatternFragment {
     AnyChar,
 }
 
+impl PatternFragment {
+    pub fn walk(&self, f: &mut impl FnMut(&PatternFragment)) {
+        f(self);
+        match self {
+            PatternFragment::Literal(_) => {}
+            PatternFragment::CharRange(_) => {}
+            PatternFragment::CharGroup(_) => {}
+            PatternFragment::CharFilter(_) => {}
+            PatternFragment::ParserRef(_) => {}
+            PatternFragment::AnyChar => {}
+            PatternFragment::Span(_) => {}
+            PatternFragment::Labeled(inner) => {
+                inner.pattern.walk(f);
+            }
+            PatternFragment::Ignore(inner) => {
+                inner.walk(f);
+            }
+            PatternFragment::Nested(PatternList::List(list)) => {
+                for pat in list {
+                    pat.fragment.walk(f);
+                }
+            }
+            PatternFragment::Nested(PatternList::Choices(choices)) => {
+                for pat in choices.iter().flatten() {
+                    pat.fragment.walk(f);
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Pattern {
     fragment: PatternFragment,
@@ -127,7 +158,7 @@ impl Parse for PatternFragment {
             input.parse().map(|v| PatternFragment::Ignore(Box::new(v)))
         } else if input.peek(Token![<]) {
             input.parse::<Token![<]>()?;
-            let patterns = list(input, true)?;
+            let patterns = list(input, true, |i| i.peek(Token![>]))?;
             input.parse::<Token![>]>()?;
             Ok(PatternFragment::Span(patterns))
         } else if input.peek(Ident) {
@@ -224,8 +255,18 @@ impl Parse for LabeledPattern {
     fn parse(input: ParseStream) -> Result<Self> {
         let label = input.parse()?;
         input.parse::<Token![=]>()?;
-        let pattern = input.parse()?;
-        Ok(LabeledPattern { label, pattern })
+        let pattern: PatternFragment = input.parse()?;
+        let mut inner_labeled = false;
+        pattern.walk(&mut |v| {
+            if matches!(v, PatternFragment::Labeled(_)) {
+                inner_labeled = true;
+            }
+        });
+        if inner_labeled {
+            Err(input.error("May not label a pattern which contains further labels"))
+        } else {
+            Ok(LabeledPattern { label, pattern })
+        }
     }
 }
 
@@ -237,14 +278,16 @@ pub(crate) enum PatternList {
 
 impl Parse for PatternList {
     fn parse(input: ParseStream) -> Result<Self> {
-        let patterns: Vec<Pattern> = list(input, true)?;
+        let patterns: Vec<Pattern> = list(input, true, |i| i.peek(Token![->]) | i.peek(Token![|]))?;
         if !input.peek(Token![|]) {
             return Ok(PatternList::List(patterns));
         }
         let mut choices: Vec<Vec<Pattern>> = vec![patterns];
         while input.peek(Token![|]) {
             input.parse::<Token![|]>()?;
-            choices.push(list(input, true)?);
+            choices.push(list(input, true, |i| {
+                i.peek(Token![|]) || i.peek(Token![->])
+            })?);
         }
         Ok(PatternList::Choices(choices))
     }
@@ -271,18 +314,14 @@ impl Parse for Modifier {
     }
 }
 
-fn list<T: Parse>(input: ParseStream, require: bool) -> Result<Vec<T>> {
+fn list<T: Parse>(
+    input: ParseStream,
+    require: bool,
+    terminator: fn(ParseStream) -> bool,
+) -> Result<Vec<T>> {
     let mut vec = vec![];
-    if require {
+    while (require && vec.is_empty()) || (!input.is_empty() && !terminator(input)) {
         vec.push(input.parse()?);
-    }
-    loop {
-        let fork = input.fork();
-        let Ok(val) = fork.parse() else {
-            break;
-        };
-        vec.push(val);
-        input.advance_to(&fork);
     }
     Ok(vec)
 }
