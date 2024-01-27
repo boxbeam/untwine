@@ -5,12 +5,12 @@ use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
 use syn::{
-    bracketed, custom_keyword, parenthesized,
+    braced, bracketed, custom_keyword, parenthesized,
     parse::{discouraged::Speculative, Parse, ParseStream},
     parse_macro_input,
-    token::{Bracket, Paren},
+    token::{Brace, Bracket, Paren},
     visit::Visit,
-    Block, Ident, Lit, LitChar, LitStr, MacroDelimiter, Result, Token, Type,
+    Block, Expr, Ident, Lit, LitChar, LitStr, MacroDelimiter, Result, Token, Type,
 };
 
 mod type_utils;
@@ -79,9 +79,14 @@ impl Parse for ParserDef {
 pub(crate) enum PatternFragment {
     Literal(StringLiteral),
     CharRange(CharRange),
+    CharGroup(CharGroup),
+    CharFilter(CharFilter),
     ParserRef(Ident),
     Labeled(Box<LabeledPattern>),
+    Ignore(Box<PatternFragment>),
+    Span(Vec<Pattern>),
     Nested(PatternList),
+    AnyChar,
 }
 
 #[derive(Debug)]
@@ -103,14 +108,28 @@ impl Parse for PatternFragment {
     fn parse(input: ParseStream) -> Result<Self> {
         if input.peek(LitChar) {
             input.parse().map(PatternFragment::CharRange)
+        } else if input.peek(Bracket) {
+            input.parse().map(PatternFragment::CharGroup)
+        } else if input.peek(Brace) {
+            input.parse().map(PatternFragment::CharFilter)
         } else if input.peek(LitStr) || input.peek(kw::i) {
             input.parse().map(PatternFragment::Literal)
         } else if input.peek(Paren) {
             let content;
             parenthesized!(content in input);
             content.parse().map(PatternFragment::Nested)
+        } else if input.peek(Token![.]) {
+            input.parse::<Token![.]>()?;
+            Ok(PatternFragment::AnyChar)
         } else if input.peek(Ident) && input.peek2(Token![=]) {
             input.parse().map(|v| PatternFragment::Labeled(Box::new(v)))
+        } else if input.peek(Token![_]) {
+            input.parse().map(|v| PatternFragment::Ignore(Box::new(v)))
+        } else if input.peek(Token![<]) {
+            input.parse::<Token![<]>()?;
+            let patterns = list(input, true)?;
+            input.parse::<Token![>]>()?;
+            Ok(PatternFragment::Span(patterns))
         } else if input.peek(Ident) {
             input.parse().map(PatternFragment::ParserRef)
         } else {
@@ -157,6 +176,40 @@ impl Parse for CharRange {
         Ok(CharRange {
             inverted: inverted.is_some(),
             range: begin.value()..=end.value(),
+        })
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CharGroup {
+    inverted: bool,
+    chars: Vec<char>,
+}
+
+impl Parse for CharGroup {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let content;
+        bracketed!(content in input);
+        let inverted: Option<Token![^]> = content.parse()?;
+        let str: LitStr = content.parse()?;
+        Ok(CharGroup {
+            inverted: inverted.is_some(),
+            chars: str.value().chars().collect(),
+        })
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CharFilter {
+    expr: Expr,
+}
+
+impl Parse for CharFilter {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let content;
+        braced!(content in input);
+        Ok(CharFilter {
+            expr: content.parse()?,
         })
     }
 }

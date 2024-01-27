@@ -28,14 +28,14 @@ pub fn vec_of(typ: Type) -> Type {
 }
 
 fn fragment_type(fragment: &PatternFragment, parser_types: &HashMap<String, Type>) -> Type {
+    use PatternFragment as P;
     let tokens = match fragment {
-        crate::PatternFragment::Literal(_) => quote! {&str},
-        crate::PatternFragment::CharRange(_) => quote! {char},
-        crate::PatternFragment::ParserRef(ident) => {
-            return parser_types[&ident.to_string()].clone()
-        }
-        crate::PatternFragment::Labeled(pat) => return fragment_type(&pat.pattern, parser_types),
-        crate::PatternFragment::Nested(_) => todo!(),
+        P::Literal(_) | P::Span(_) => quote! {&str},
+        P::CharRange(_) | P::CharGroup(_) | P::AnyChar | P::CharFilter(_) => quote! {char},
+        P::Ignore(_) => quote! {()},
+        P::ParserRef(ident) => return parser_types[&ident.to_string()].clone(),
+        P::Labeled(pat) => return fragment_type(&pat.pattern, parser_types),
+        P::Nested(_) => todo!(),
     };
     syn::parse(tokens.into()).unwrap()
 }
