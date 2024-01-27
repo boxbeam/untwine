@@ -106,7 +106,7 @@ impl Parse for Pattern {
 
 impl Parse for PatternFragment {
     fn parse(input: ParseStream) -> Result<Self> {
-        if input.peek(LitChar) {
+        if input.peek(LitChar) || input.peek(Token![^]) {
             input.parse().map(PatternFragment::CharRange)
         } else if input.peek(Bracket) {
             input.parse().map(PatternFragment::CharGroup)
