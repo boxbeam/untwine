@@ -253,7 +253,7 @@ pub(crate) struct LabeledPattern {
 
 impl Parse for LabeledPattern {
     fn parse(input: ParseStream) -> Result<Self> {
-        let label = input.parse()?;
+        let label: Ident = input.parse()?;
         input.parse::<Token![=]>()?;
         let pattern: PatternFragment = input.parse()?;
         let mut inner_labeled = false;
@@ -263,7 +263,10 @@ impl Parse for LabeledPattern {
             }
         });
         if inner_labeled {
-            Err(input.error("May not label a pattern which contains further labels"))
+            Err(syn::Error::new(
+                label.span(),
+                "Cannot label a pattern which contains further labels",
+            ))
         } else {
             Ok(LabeledPattern { label, pattern })
         }
