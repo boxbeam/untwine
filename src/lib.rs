@@ -30,7 +30,7 @@ impl AnyStack {
     }
 
     /// Create an untyped split at the root
-    pub fn any<'a>(&'a mut self) -> AnySplit<'a> {
+    pub fn any(&mut self) -> AnySplit {
         AnySplit {
             mem: NonNull::new(&mut *self.stack as *mut [u8]).unwrap(),
             parent_split: None,
@@ -142,12 +142,7 @@ impl<'a, T> Stack<'a, T> {
         }
         // Safe because this data's destructor will never be run and it will never be accessed
         // again except to overwrite it with valid data
-        let elem = unsafe {
-            std::mem::replace(
-                &mut self.int[self.len],
-                std::mem::MaybeUninit::uninit().assume_init(),
-            )
-        };
+        let elem = unsafe { std::ptr::read(&self.int[self.len]) };
         self.len -= 1;
         Some(elem)
     }
