@@ -130,7 +130,11 @@ fn parse_value(fragment: &PatternFragment, state: &CodegenState) -> TokenStream 
             }
         }
         PatternFragment::CharGroup(group) => {
-            let inverted = group.inverted;
+            let inverted = if group.inverted {
+                quote! {!}
+            } else {
+                quote! {}
+            };
             let chars: String = group.chars.iter().collect();
             quote! {
                 #ctx.char_filter(|c| #inverted #chars.contains(c), #parser_name)?
