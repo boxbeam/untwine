@@ -10,18 +10,22 @@ use syn::{
 
 use crate::{Modifier, Pattern, PatternFragment, PatternList};
 
-pub fn optional(typ: Type) -> Type {
+pub fn optional(typ: &Type) -> Type {
     let tokens = quote! {
         Option<#typ>
     };
     syn::parse(tokens.into()).unwrap()
 }
 
-pub fn vec_of(typ: Type) -> Type {
+pub fn vec_of(typ: &Type) -> Type {
     let tokens = quote! {
         Vec<#typ>
     };
     syn::parse(tokens.into()).unwrap()
+}
+
+fn is_unit(typ: &Type) -> bool {
+    matches!(typ, Type::Tuple(tup) if tup.elems.len() == 0)
 }
 
 fn fragment_type(
@@ -45,7 +49,7 @@ fn list_type(patterns: &Vec<Pattern>, parser_types: &HashMap<String, Type>) -> s
     let mut tuple = vec![];
     for pattern in patterns {
         let typ = get_type(pattern, parser_types)?;
-        if !matches!(&typ.typ, Type::Tuple(tup) if tup.elems.len() == 0) {
+        if !is_unit(&typ.typ) {
             tuple.push(typ.typ);
         }
     }
@@ -103,8 +107,8 @@ impl Wrapper {
     fn wrap(&self, typ: Type) -> Type {
         match self {
             Wrapper::None => typ,
-            Wrapper::Vec => vec_of(typ),
-            Wrapper::Option => optional(typ),
+            Wrapper::Vec => vec_of(&typ),
+            Wrapper::Option => optional(&typ),
         }
     }
 
@@ -112,11 +116,25 @@ impl Wrapper {
         match self {
             Wrapper::None => quote! {let #var;},
             Wrapper::Vec => {
-                let stream = quote! {let mut #var = #last_stack.stack();};
+                let stream = quote! {let mut #var;};
                 *last_stack = var.clone();
                 stream
             }
             Wrapper::Option => quote! {let mut #var = None;},
+        }
+    }
+
+    fn init(&self, var: &Ident, last_stack: &mut Ident) -> TokenStream {
+        match self {
+            Wrapper::None => quote! {},
+            Wrapper::Vec => {
+                let tokens = quote! {
+                    #var = #last_stack.stack();
+                };
+                *last_stack = var.clone();
+                tokens
+            }
+            Wrapper::Option => todo!(),
         }
     }
 
