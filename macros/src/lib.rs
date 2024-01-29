@@ -83,56 +83,10 @@ pub(crate) enum PatternFragment {
     CharFilter(CharFilter),
     ParserRef(Ident),
     Labeled(Box<LabeledPattern>),
-    Ignore(Box<PatternFragment>),
-    Span(Vec<Pattern>),
+    Ignore(Box<IgnoredPattern>),
+    Span(PatternList),
     Nested(PatternList),
     AnyChar,
-}
-
-impl PatternFragment {
-    pub fn walk(&self, f: &mut impl FnMut(&PatternFragment)) {
-        f(self);
-        match self {
-            PatternFragment::Literal(_) => {}
-            PatternFragment::CharRange(_) => {}
-            PatternFragment::CharGroup(_) => {}
-            PatternFragment::CharFilter(_) => {}
-            PatternFragment::ParserRef(_) => {}
-            PatternFragment::AnyChar => {}
-            PatternFragment::Span(_) => {}
-            PatternFragment::Labeled(inner) => {
-                inner.pattern.walk(f);
-            }
-            PatternFragment::Ignore(inner) => {
-                inner.walk(f);
-            }
-            PatternFragment::Nested(PatternList::List(list)) => {
-                for pat in list {
-                    pat.fragment.walk(f);
-                }
-            }
-            PatternFragment::Nested(PatternList::Choices(choices)) => {
-                for pat in choices.iter().flatten() {
-                    pat.fragment.walk(f);
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct Pattern {
-    fragment: PatternFragment,
-    modifier: Option<Modifier>,
-}
-
-impl Parse for Pattern {
-    fn parse(input: ParseStream) -> Result<Self> {
-        Ok(Pattern {
-            fragment: input.parse()?,
-            modifier: optional(input),
-        })
-    }
 }
 
 impl Parse for PatternFragment {
@@ -158,7 +112,7 @@ impl Parse for PatternFragment {
             input.parse().map(|v| PatternFragment::Ignore(Box::new(v)))
         } else if input.peek(Token![<]) {
             input.parse::<Token![<]>()?;
-            let patterns = list(input, true, |i| i.peek(Token![>]))?;
+            let patterns = input.parse()?;
             input.parse::<Token![>]>()?;
             Ok(PatternFragment::Span(patterns))
         } else if input.peek(Ident) {
@@ -166,6 +120,69 @@ impl Parse for PatternFragment {
         } else {
             Err(input.error("expected pattern fragment"))
         }
+    }
+}
+
+impl PatternFragment {
+    pub fn walk(&self, f: &mut impl FnMut(&PatternFragment)) {
+        f(self);
+        match self {
+            PatternFragment::Literal(_) => {}
+            PatternFragment::CharRange(_) => {}
+            PatternFragment::CharGroup(_) => {}
+            PatternFragment::CharFilter(_) => {}
+            PatternFragment::ParserRef(_) => {}
+            PatternFragment::AnyChar => {}
+            PatternFragment::Span(_) => {}
+            PatternFragment::Labeled(inner) => {
+                inner.pattern.fragment.walk(f);
+            }
+            PatternFragment::Ignore(inner) => {
+                inner.pattern.fragment.walk(f);
+            }
+            PatternFragment::Nested(PatternList::List(list)) => {
+                for pat in list {
+                    pat.fragment.walk(f);
+                }
+            }
+            PatternFragment::Nested(PatternList::Choices(choices)) => {
+                for pat in choices.iter().flatten() {
+                    pat.fragment.walk(f);
+                }
+            }
+        }
+    }
+
+    pub fn children(&self) -> Vec<&Pattern> {
+        use PatternFragment as PF;
+        use PatternList as PL;
+        match self {
+            PF::Literal(_) => vec![],
+            PF::CharRange(_) => vec![],
+            PF::CharGroup(_) => vec![],
+            PF::CharFilter(_) => vec![],
+            PF::ParserRef(_) => vec![],
+            PF::Labeled(p) => vec![&p.as_ref().pattern],
+            PF::Ignore(p) => vec![&p.as_ref().pattern],
+            PF::Nested(PL::List(l)) | PF::Span(PL::List(l)) => l.iter().collect(),
+            PF::Nested(PL::Choices(l)) | PF::Span(PL::Choices(l)) => l.iter().flatten().collect(),
+            PF::AnyChar => vec![],
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Pattern {
+    fragment: PatternFragment,
+    modifier: Option<Modifier>,
+}
+
+impl Parse for Pattern {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(Pattern {
+            fragment: input.parse()?,
+            modifier: optional(input),
+        })
     }
 }
 
@@ -178,16 +195,16 @@ mod kw {
 #[derive(Debug)]
 pub(crate) struct StringLiteral {
     case_sensitive: bool,
-    string: String,
+    string: LitStr,
 }
 
 impl Parse for StringLiteral {
     fn parse(input: ParseStream) -> Result<Self> {
         let case_insensitive: Option<kw::i> = input.parse()?;
-        let s: LitStr = input.parse()?;
+        let string: LitStr = input.parse()?;
         Ok(StringLiteral {
             case_sensitive: case_insensitive.is_none(),
-            string: s.value(),
+            string,
         })
     }
 }
@@ -246,18 +263,37 @@ impl Parse for CharFilter {
 }
 
 #[derive(Debug)]
+pub(crate) struct IgnoredPattern {
+    pattern: Pattern,
+}
+
+impl Parse for IgnoredPattern {
+    fn parse(input: ParseStream) -> Result<Self> {
+        input.parse::<Token![_]>();
+        input.parse::<Token![=]>();
+        let fragment: PatternFragment = input.parse()?;
+        Ok(IgnoredPattern {
+            pattern: Pattern {
+                fragment,
+                modifier: None,
+            },
+        })
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct LabeledPattern {
     label: Ident,
-    pattern: PatternFragment,
+    pattern: Pattern,
 }
 
 impl Parse for LabeledPattern {
     fn parse(input: ParseStream) -> Result<Self> {
         let label: Ident = input.parse()?;
         input.parse::<Token![=]>()?;
-        let pattern: PatternFragment = input.parse()?;
+        let fragment: PatternFragment = input.parse()?;
         let mut inner_labeled = false;
-        pattern.walk(&mut |v| {
+        fragment.walk(&mut |v| {
             if matches!(v, PatternFragment::Labeled(_)) {
                 inner_labeled = true;
             }
@@ -268,7 +304,13 @@ impl Parse for LabeledPattern {
                 "Cannot label a pattern which contains further labels",
             ))
         } else {
-            Ok(LabeledPattern { label, pattern })
+            Ok(LabeledPattern {
+                label,
+                pattern: Pattern {
+                    fragment,
+                    modifier: None,
+                },
+            })
         }
     }
 }
@@ -279,24 +321,26 @@ pub(crate) enum PatternList {
     Choices(Vec<Vec<Pattern>>),
 }
 
+fn list_terminator(input: ParseStream) -> bool {
+    input.peek(Token![|]) || input.peek(Token![->]) || input.peek(Token![>])
+}
+
 impl Parse for PatternList {
     fn parse(input: ParseStream) -> Result<Self> {
-        let patterns: Vec<Pattern> = list(input, true, |i| i.peek(Token![->]) | i.peek(Token![|]))?;
+        let patterns: Vec<Pattern> = list(input, true, list_terminator)?;
         if !input.peek(Token![|]) {
             return Ok(PatternList::List(patterns));
         }
         let mut choices: Vec<Vec<Pattern>> = vec![patterns];
         while input.peek(Token![|]) {
             input.parse::<Token![|]>()?;
-            choices.push(list(input, true, |i| {
-                i.peek(Token![|]) || i.peek(Token![->])
-            })?);
+            choices.push(list(input, true, list_terminator)?);
         }
         Ok(PatternList::Choices(choices))
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Modifier {
     Optional,
     Repeating,

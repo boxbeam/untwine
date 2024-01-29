@@ -1,204 +1,63 @@
-use std::{
-    cell::Cell,
-    ops::{Deref, DerefMut},
-    ptr::NonNull,
-};
+use any_stack::AnySplit;
 
 pub extern crate macros;
 
-/// A fixed-size chunk of memory which you can split stacks off of.
-/// Each stack remains mutable until you split another stack off of it,
-/// and stacks can be of any type. Only one will be mutable at a time,
-/// and you must drop the child of a stack before splitting it again.
-pub struct AnyStack {
-    stack: Box<[u8]>,
+pub mod any_stack;
+
+pub type Result<T> = std::result::Result<T, ParserError>;
+
+pub enum ParserError {
+    ExpectedLiteral(&'static str),
+    ExpectedToken(&'static str),
 }
 
-impl AnyStack {
-    /// Create a new AnyStack allocator with the given byte capacity.
-    /// This allocates the entire chunk of memory at once, and it can
-    /// never be expanded.
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            stack: vec![0; capacity].into_boxed_slice(),
+pub struct ParserContext<'a> {
+    original: &'a str,
+    cur: &'a str,
+    pub split: AnySplit<'a>,
+}
+
+impl<'a> ParserContext<'a> {
+    pub fn literal(&mut self, literal: &'static str, case_sensitive: bool) -> Result<()> {
+        if self.cur.len() < literal.len() {
+            return Err(ParserError::ExpectedLiteral(literal));
+        }
+        let found = if case_sensitive {
+            self.cur.starts_with(literal)
+        } else {
+            let a = self.cur.chars().map(|c| c.to_lowercase()).flatten();
+            let b = literal.chars().map(|c| c.to_lowercase()).flatten();
+            a.zip(b).all(|(a, b)| a == b)
+        };
+        if found {
+            self.cur = &self.cur[literal.len()..];
+            Ok(())
+        } else {
+            Err(ParserError::ExpectedLiteral(literal))
         }
     }
 
-    /// Create the root stack
-    pub fn stack<T>(&mut self) -> Stack<T> {
-        Stack::new(NonNull::new(&mut *self.stack as *mut [u8]).unwrap())
-    }
-
-    /// Create an untyped split at the root
-    pub fn any(&mut self) -> AnySplit {
-        AnySplit {
-            mem: NonNull::new(&mut *self.stack as *mut [u8]).unwrap(),
-            parent_split: None,
+    pub fn char_filter(
+        &mut self,
+        filter: impl Fn(&char) -> bool,
+        token_name: &'static str,
+    ) -> Result<char> {
+        let c = self.cur.chars().next();
+        let res = c
+            .filter(filter)
+            .ok_or(ParserError::ExpectedToken(token_name));
+        if let Ok(c) = res {
+            self.cur = &self.cur[..c.len_utf8()];
         }
-    }
-}
-
-/// An untyped head of an [AnyStack] which can be split into a [Stack] of any type
-pub struct AnySplit<'a> {
-    mem: NonNull<[u8]>,
-    parent_split: Option<&'a Cell<bool>>,
-}
-
-impl<'a> AnySplit<'a> {
-    /// Split a typed stack off the [AnyStack] head.
-    pub fn stack<T>(self) -> Stack<'a, T> {
-        let mut stack = Stack::new(self.mem);
-        stack.parent_split = self.parent_split;
-        stack
-    }
-}
-
-impl<'a> Drop for AnySplit<'a> {
-    fn drop(&mut self) {
-        if let Some(parent_split) = self.parent_split {
-            parent_split.replace(false);
-        }
-    }
-}
-
-/// The head of an [AnyStack]. Can be treated like a normal stack, dereferences to a slice,
-/// and can be split to create a new stack of any type.
-pub struct Stack<'a, T> {
-    mem: NonNull<[u8]>,
-    int: &'a mut [T],
-    len: usize,
-    skip_bytes: usize,
-    split: Cell<bool>,
-    parent_split: Option<&'a Cell<bool>>,
-}
-
-impl<'a, T> Deref for Stack<'a, T> {
-    type Target = [T];
-
-    fn deref(&self) -> &Self::Target {
-        &self.int[..self.len]
-    }
-}
-
-impl<'a, T> DerefMut for Stack<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.int[..self.len]
-    }
-}
-
-impl<'a, T> Stack<'a, T> {
-    fn new(stack: NonNull<[u8]>) -> Self {
-        // Safe because the stack pointer is known valid for 'a
-        let (before, int, _) = unsafe { (*stack.as_ptr()).align_to_mut() };
-        Stack {
-            mem: stack,
-            int,
-            len: 0,
-            skip_bytes: before.len(),
-            split: Default::default(),
-            parent_split: None,
-        }
+        res
     }
 
-    fn split_ptr(&self) -> NonNull<[u8]> {
-        if self.split.get() {
-            panic!("Stack was split from twice");
-        }
-        let pos = (std::mem::size_of::<T>() * self.len) + self.skip_bytes;
-        // Safe because the [u8] is only stored behind a pointer instead of a reference
-        // because the &mut [T] is an alias to the same data, but rust has no way of knowing that.
-        // This just prevents it from "looking like" there are two mutable borrows of the same data.
-        let mem = unsafe { NonNull::new_unchecked((*self.mem.as_ptr()).split_at_mut(pos).1) };
-        mem
+    pub fn with_split(mut self, split: AnySplit<'a>) -> Self {
+        self.split = split;
+        self
     }
 
-    /// Split off another stack, making this one immutable.
-    /// Cannot split the same stack twice unless the split-off child has been dropped.
-    pub fn stack<V>(&self) -> Stack<V> {
-        let mem = self.split_ptr();
-        let mut stack = Stack::new(mem);
-        stack.parent_split = Some(&self.split);
-        stack
-    }
-
-    /// Split off the head without any specific stack type, so it can be chosen by the receiver.
-    pub fn split_any(&self) -> AnySplit {
-        AnySplit {
-            mem: self.split_ptr(),
-            parent_split: Some(&self.split),
-        }
-    }
-
-    /// Push an element onto the stack.
-    pub fn push(&mut self, val: T) {
-        self.int[self.len] = val;
-        self.len += 1;
-    }
-
-    /// Remove the top element from the stack.
-    pub fn pop(&mut self) -> Option<T> {
-        if self.len == 0 {
-            return None;
-        }
-        // Safe because this data's destructor will never be run and it will never be accessed
-        // again except to overwrite it with valid data
-        let elem = unsafe { std::ptr::read(&self.int[self.len]) };
-        self.len -= 1;
-        Some(elem)
-    }
-}
-
-impl<'a, T> Drop for Stack<'a, T> {
-    fn drop(&mut self) {
-        for t in &mut **self {
-            // Safe because this &mut [T] is constructed by casting a &mut [u8],
-            // which means the destructors would not be run normally.
-            // When this is dropped, we need to manually run the destructors.
-            unsafe {
-                std::ptr::drop_in_place(t as *mut _);
-            }
-        }
-        if let Some(parent_split) = self.parent_split {
-            parent_split.replace(false);
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_universal_stack() {
-        let mut a = AnyStack::new(1000);
-        let mut stack: Stack<i32> = a.stack();
-        stack.push(1);
-        let mut stack_2 = stack.stack();
-        stack_2.push("Hello".to_string());
-
-        assert_eq!(&*stack, &[1]);
-        assert_eq!(&*stack_2, &["Hello"]);
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_multi_split() {
-        let mut stack = AnyStack::new(1000);
-        let first = stack.stack::<i32>();
-        let mut second = first.stack::<i32>();
-        let mut third = first.stack::<i32>();
-        second.push(1);
-        third.push(1);
-    }
-
-    #[test]
-    fn test_multi_split_scope() {
-        let mut stack = AnyStack::new(1000);
-        let first = stack.stack::<i32>();
-        {
-            let mut split = first.stack::<i32>();
-            split.push(1);
-        }
-        first.stack::<i32>();
+    pub fn original(&self) -> &str {
+        self.original
     }
 }
