@@ -5,7 +5,7 @@ use quote::quote;
 use syn::{
     punctuated::Punctuated,
     token::{Gt, Lt},
-    AngleBracketedGenericArguments, Path, PathArguments, PathSegment, Type, TypePath,
+    AngleBracketedGenericArguments, Path, PathArguments, PathSegment, Type, TypePath, TypeTuple,
 };
 
 use crate::{Modifier, Pattern, PatternFragment, PatternList};
@@ -24,27 +24,56 @@ pub fn vec_of(typ: Type) -> Type {
     syn::parse(tokens.into()).unwrap()
 }
 
-fn fragment_type(fragment: &PatternFragment, parser_types: &HashMap<String, Type>) -> Type {
+fn fragment_type(
+    fragment: &PatternFragment,
+    parser_types: &HashMap<String, Type>,
+) -> syn::Result<Type> {
     use PatternFragment as P;
     let tokens = match fragment {
         P::Literal(_) | P::Span(_) => quote! {&str},
         P::CharRange(_) | P::CharGroup(_) | P::AnyChar | P::CharFilter(_) => quote! {char},
         P::Ignore(_) => quote! {()},
-        P::ParserRef(ident) => return parser_types[&ident.to_string()].clone(),
-        P::Labeled(pat) => return fragment_type(&pat.pattern.fragment, parser_types),
-        P::Nested(_) => todo!(),
+        P::ParserRef(ident) => return Ok(parser_types[&ident.to_string()].clone()),
+        P::Labeled(pat) => return Ok(fragment_type(&pat.pattern.fragment, parser_types)?),
+        P::Nested(PatternList::List(l)) => return Ok(list_type(l, parser_types)?),
+        P::Nested(PatternList::Choices(c)) => {
+            let mut choices = c.into_iter();
+            let first = choices.next().unwrap();
+            let ty = list_type(first, parser_types)?;
+            return Ok(ty);
+        }
     };
-    syn::parse(tokens.into()).unwrap()
+    Ok(syn::parse(tokens.into()).unwrap())
 }
 
-pub fn get_type(pattern: &Pattern, parser_types: &HashMap<String, Type>) -> ParserType {
-    let typ = fragment_type(&pattern.fragment, parser_types);
+fn list_type(patterns: &Vec<Pattern>, parser_types: &HashMap<String, Type>) -> syn::Result<Type> {
+    let mut tuple = vec![];
+    for pattern in patterns {
+        let typ = get_type(pattern, parser_types)?;
+        if !matches!(&typ.typ, Type::Tuple(tup) if tup.elems.len() == 0) {
+            tuple.push(typ.typ);
+        }
+    }
+
+    let tokens = quote! {
+        (
+            #(#tuple),*
+        )
+    };
+    Ok(syn::parse(tokens.into()).unwrap())
+}
+
+pub fn get_type(
+    pattern: &Pattern,
+    parser_types: &HashMap<String, Type>,
+) -> syn::Result<ParserType> {
+    let typ = fragment_type(&pattern.fragment, parser_types)?;
     let wrapper = pattern
         .modifier
         .clone()
         .map(Wrapper::from)
         .unwrap_or(Wrapper::None);
-    ParserType { typ, wrapper }
+    Ok(ParserType { typ, wrapper })
 }
 
 pub struct ParserType {
@@ -212,7 +241,7 @@ fn populate_label_types_recursive<'a>(
 ) -> syn::Result<()> {
     for child in children {
         if let PatternFragment::Labeled(labeled) = &child.fragment {
-            let mut typ = get_type(child, parser_types);
+            let mut typ = get_type(child, parser_types)?;
             typ.wrapper = typ.wrapper.combine(parent_wrapper);
             if label_types.insert(labeled.label.clone(), typ).is_some() {
                 return Err(syn::Error::new_spanned(
