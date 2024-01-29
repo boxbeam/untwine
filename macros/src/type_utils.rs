@@ -36,12 +36,7 @@ fn fragment_type(
         P::ParserRef(ident) => return Ok(parser_types[&ident.to_string()].clone()),
         P::Labeled(pat) => return Ok(fragment_type(&pat.pattern.fragment, parser_types)?),
         P::Nested(PatternList::List(l)) => return Ok(list_type(l, parser_types)?),
-        P::Nested(PatternList::Choices(c)) => {
-            let mut choices = c.into_iter();
-            let first = choices.next().unwrap();
-            let ty = list_type(first, parser_types)?;
-            return Ok(ty);
-        }
+        P::Nested(PatternList::Choices(c)) => return Ok(list_type(&c[0], parser_types)?),
     };
     Ok(syn::parse(tokens.into()).unwrap())
 }
