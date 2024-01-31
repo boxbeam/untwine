@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::quote;
+use quote::{quote, TokenStreamExt};
 use syn::{
     punctuated::Punctuated,
     token::{Gt, Lt},
@@ -92,6 +92,7 @@ struct CodegenState {
     last_stack: Ident,
     parser_name: String,
     label_types: HashMap<Ident, ParserType>,
+    parser_types: HashMap<String, Type>,
 }
 
 impl Wrapper {
@@ -160,11 +161,7 @@ fn parse_value(fragment: &PatternFragment, state: &CodegenState) -> TokenStream 
             }
         }
         PatternFragment::CharRange(range) => {
-            let inverted = if range.inverted {
-                quote! {!}
-            } else {
-                quote! {}
-            };
+            let inverted = range.inverted.then(|| quote! {!});
             let range_min = range.range.start();
             let range_max = range.range.end();
             quote! {
@@ -219,8 +216,68 @@ fn parse_value(fragment: &PatternFragment, state: &CodegenState) -> TokenStream 
     }
 }
 
+fn label(fragment: &PatternFragment) -> Option<&Ident> {
+    match fragment {
+        PatternFragment::Literal(_) => None,
+        PatternFragment::CharRange(_) => None,
+        PatternFragment::CharGroup(_) => None,
+        PatternFragment::CharFilter(_) => None,
+        PatternFragment::ParserRef(_) => None,
+        PatternFragment::Labeled(l) => Some(&l.label),
+        PatternFragment::Ignore(l) => label(&l.pattern.fragment),
+        PatternFragment::Span(list) | PatternFragment::Nested(list) => {
+            children(list).into_iter().find_map(|p| label(&p.fragment))
+        }
+        PatternFragment::AnyChar => None,
+    }
+}
+
+fn children(list: &PatternList) -> Vec<&Pattern> {
+    match list {
+        PatternList::List(patterns) => patterns.iter().collect(),
+        PatternList::Choices(choices) => choices.iter().flatten().collect(),
+    }
+}
+
 fn parse_pattern_list(patterns: &PatternList, state: &CodegenState) -> TokenStream {
     todo!()
+}
+
+fn parse_patterns(
+    patterns: &Vec<Pattern>,
+    state: &CodegenState,
+) -> Result<TokenStream, syn::Error> {
+    let mut tuple_params = 0;
+    let mut parsers = vec![];
+    for pattern in patterns {
+        let typ = get_type(pattern, &state.parser_types)?;
+        let prefix = (!is_unit(&typ.typ)).then(|| {
+            let ident = numbered_ident(tuple_params);
+            tuple_params += 1;
+            quote! {let #ident =}
+        });
+        let parse = parse_value(&pattern.fragment, state);
+        parsers.push(quote! {#prefix #parse});
+    }
+    let tuple_names = (0..tuple_params).map(numbered_ident);
+    Ok(quote! {
+        {
+            #(#parsers)*
+            (#(#tuple_names),*)
+        }
+    })
+}
+
+fn parse_patterns_top_level(
+    patterns: &Vec<Pattern>,
+    parser_types: &HashMap<String, Type>,
+) -> TokenStream {
+    // initialize each pattern (Wrapper::init) before parsing
+    todo!()
+}
+
+fn numbered_ident(num: usize) -> Ident {
+    Ident::new(&format!("_{num}"), Span::call_site())
 }
 
 impl From<Modifier> for Wrapper {
@@ -263,11 +320,14 @@ fn populate_label_types_recursive<'a>(
                 ));
             }
         } else {
-            let child_wrapper = child
+            let mut child_wrapper = child
                 .modifier
                 .clone()
                 .map(Wrapper::from)
                 .unwrap_or(Wrapper::None);
+            if let PatternFragment::Nested(PatternList::Choices(_)) = &child.fragment {
+                child_wrapper = child_wrapper.combine(Wrapper::Option);
+            }
             populate_label_types_recursive(
                 child.fragment.children(),
                 parser_types,
