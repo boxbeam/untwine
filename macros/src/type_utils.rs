@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, TokenStreamExt};
@@ -28,61 +28,19 @@ fn is_unit(typ: &Type) -> bool {
     matches!(typ, Type::Tuple(tup) if tup.elems.len() == 0)
 }
 
-fn fragment_type(
-    fragment: &PatternFragment,
-    parser_types: &HashMap<String, Type>,
-) -> syn::Result<Type> {
-    use PatternFragment as P;
-    let tokens = match fragment {
-        P::Literal(_) | P::Span(_) => quote! {&str},
-        P::CharRange(_) | P::CharGroup(_) | P::AnyChar | P::CharFilter(_) => quote! {char},
-        P::Ignore(_) => quote! {()},
-        P::ParserRef(ident) => return Ok(parser_types[&ident.to_string()].clone()),
-        P::Labeled(pat) => return Ok(fragment_type(&pat.pattern.fragment, parser_types)?),
-        P::Nested(PatternList::List(l)) => return Ok(list_type(l, parser_types)?),
-        P::Nested(PatternList::Choices(c)) => return Ok(list_type(&c[0], parser_types)?),
-    };
-    Ok(syn::parse(tokens.into()).unwrap())
-}
-
-fn list_type(patterns: &Vec<Pattern>, parser_types: &HashMap<String, Type>) -> syn::Result<Type> {
-    let mut tuple = vec![];
-    for pattern in patterns {
-        let typ = get_type(pattern, parser_types)?;
-        if !is_unit(&typ.typ) {
-            tuple.push(typ.typ);
-        }
-    }
-
-    let tokens = quote! {
-        (
-            #(#tuple),*
-        )
-    };
-    Ok(syn::parse(tokens.into()).unwrap())
-}
-
-pub fn get_type(
-    pattern: &Pattern,
-    parser_types: &HashMap<String, Type>,
-) -> syn::Result<ParserType> {
-    let typ = fragment_type(&pattern.fragment, parser_types)?;
-    let wrapper = pattern
-        .modifier
-        .clone()
-        .map(Wrapper::from)
-        .unwrap_or(Wrapper::None);
-    Ok(ParserType { typ, wrapper })
-}
-
 pub struct ParserType {
     typ: Type,
-    wrapper: Wrapper,
+    wrappers: VecDeque<Wrapper>,
+}
+
+impl ParserType {
+    fn insert(&self, ident: &Ident, inner_value: &TokenStream) -> TokenStream {
+        todo!()
+    }
 }
 
 #[derive(Clone, Copy)]
 pub enum Wrapper {
-    None,
     Vec,
     Option,
 }
@@ -98,7 +56,6 @@ struct CodegenState {
 impl Wrapper {
     fn combine(&self, other: Wrapper) -> Wrapper {
         match (self, other) {
-            (Wrapper::None, _) => other,
             (Wrapper::Vec, _) => Wrapper::Vec,
             (Wrapper::Option, Wrapper::Vec) | (Wrapper::Vec, Wrapper::Option) => Wrapper::Vec,
             (Wrapper::Option, _) => Wrapper::Option,
@@ -107,7 +64,6 @@ impl Wrapper {
 
     fn wrap(&self, typ: Type) -> Type {
         match self {
-            Wrapper::None => typ,
             Wrapper::Vec => vec_of(&typ),
             Wrapper::Option => optional(&typ),
         }
@@ -115,7 +71,6 @@ impl Wrapper {
 
     fn define(&self, var: &Ident, last_stack: &mut Ident) -> TokenStream {
         match self {
-            Wrapper::None => quote! {let #var;},
             Wrapper::Vec => {
                 let stream = quote! {let mut #var;};
                 *last_stack = var.clone();
@@ -127,7 +82,6 @@ impl Wrapper {
 
     fn init(&self, var: &Ident, last_stack: &mut Ident) -> TokenStream {
         match self {
-            Wrapper::None => quote! {},
             Wrapper::Vec => {
                 let tokens = quote! {
                     #var = #last_stack.stack();
@@ -141,7 +95,6 @@ impl Wrapper {
 
     fn insert(&self, var: &Ident, parse: &TokenStream) -> TokenStream {
         match self {
-            Wrapper::None => quote! {#var = #parse;}.into(),
             Wrapper::Vec => quote! {#var.push(#parse);},
             Wrapper::Option => quote! {#var.insert(#parse);},
         }
@@ -193,7 +146,7 @@ fn parse_value(fragment: &PatternFragment, state: &CodegenState) -> TokenStream 
         PatternFragment::Labeled(pattern) => {
             let typ = &state.label_types[&pattern.label];
             let parse_inner = parse_value(&pattern.pattern.fragment, state);
-            typ.wrapper.insert(&pattern.label, &parse_inner)
+            typ.insert(&pattern.label, &parse_inner)
         }
         PatternFragment::Ignore(pattern) => {
             let parse_inner = parse_value(&pattern.pattern.fragment, state);
@@ -290,51 +243,112 @@ impl From<Modifier> for Wrapper {
     }
 }
 
+fn fragment_type(
+    fragment: &PatternFragment,
+    parser_types: &HashMap<String, Type>,
+) -> syn::Result<Type> {
+    use PatternFragment as P;
+    let tokens = match fragment {
+        P::Literal(_) | P::Span(_) => quote! {&str},
+        P::CharRange(_) | P::CharGroup(_) | P::AnyChar | P::CharFilter(_) => quote! {char},
+        P::Ignore(_) => quote! {()},
+        P::ParserRef(ident) => return Ok(parser_types[&ident.to_string()].clone()),
+        P::Labeled(pat) => return Ok(fragment_type(&pat.pattern.fragment, parser_types)?),
+        P::Nested(PatternList::List(l)) => return Ok(list_type(l, parser_types)?),
+        P::Nested(PatternList::Choices(c)) => return Ok(list_type(&c[0], parser_types)?),
+    };
+    Ok(syn::parse(tokens.into()).unwrap())
+}
+
+fn list_type(patterns: &Vec<Pattern>, parser_types: &HashMap<String, Type>) -> syn::Result<Type> {
+    let mut tuple = vec![];
+    for pattern in patterns {
+        let typ = get_type(pattern, parser_types)?;
+        if !is_unit(&typ.typ) {
+            tuple.push(typ.typ);
+        }
+    }
+
+    let tokens = quote! {
+        (
+            #(#tuple),*
+        )
+    };
+    Ok(syn::parse(tokens.into()).unwrap())
+}
+
+pub fn get_type(
+    pattern: &Pattern,
+    parser_types: &HashMap<String, Type>,
+) -> syn::Result<ParserType> {
+    let typ = fragment_type(&pattern.fragment, parser_types)?;
+    let wrappers = pattern
+        .modifier
+        .clone()
+        .map(Wrapper::from)
+        .into_iter()
+        .collect();
+    Ok(ParserType { typ, wrappers })
+}
+
 pub fn get_label_types(
     patterns: PatternList,
     parser_types: &HashMap<String, Type>,
-) -> syn::Result<HashMap<Ident, ParserType>> {
-    let mut label_types = HashMap::new();
-    let list: Vec<_> = match &patterns {
+) -> syn::Result<Vec<(Ident, ParserType)>> {
+    let mut label_types = vec![];
+    let children: Vec<_> = match &patterns {
         PatternList::List(l) => l.iter().collect(),
         PatternList::Choices(c) => c.iter().flatten().collect(),
     };
-    populate_label_types_recursive(list, parser_types, &mut label_types, Wrapper::None)?;
+    let mut wrappers = vec![];
+    let mut seen_names = HashSet::new();
+    populate_label_types_recursive(
+        children,
+        parser_types,
+        &mut label_types,
+        &mut seen_names,
+        &mut wrappers,
+    )?;
     Ok(label_types)
+}
+
+fn extend_front<T>(vec: &mut VecDeque<T>, elems: impl IntoIterator<Item = T>) {
+    for elem in elems {
+        vec.push_front(elem);
+    }
 }
 
 fn populate_label_types_recursive<'a>(
     children: impl IntoIterator<Item = &'a Pattern>,
     parser_types: &HashMap<String, Type>,
-    label_types: &mut HashMap<Ident, ParserType>,
-    parent_wrapper: Wrapper,
+    label_types: &mut Vec<(Ident, ParserType)>,
+    seen_names: &mut HashSet<String>,
+    parent_wrappers: &mut Vec<Wrapper>,
 ) -> syn::Result<()> {
     for child in children {
+        let parent_wrappers_len = parent_wrappers.len();
         if let PatternFragment::Labeled(labeled) = &child.fragment {
-            let mut typ = get_type(child, parser_types)?;
-            typ.wrapper = typ.wrapper.combine(parent_wrapper);
-            if label_types.insert(labeled.label.clone(), typ).is_some() {
-                return Err(syn::Error::new_spanned(
-                    labeled.label.clone(),
-                    "Duplicate variable binding",
-                ));
+            let label = labeled.label.clone();
+            let mut typ = get_type(&labeled.pattern, parser_types)?;
+            extend_front(&mut typ.wrappers, parent_wrappers.iter().cloned());
+            if !seen_names.insert(label.to_string()) {
+                return Err(syn::Error::new_spanned(label, "Duplicate variable name"));
             }
+            label_types.push((label, typ));
         } else {
-            let mut child_wrapper = child
-                .modifier
-                .clone()
-                .map(Wrapper::from)
-                .unwrap_or(Wrapper::None);
-            if let PatternFragment::Nested(PatternList::Choices(_)) = &child.fragment {
-                child_wrapper = child_wrapper.combine(Wrapper::Option);
+            parent_wrappers.extend(child.modifier.as_ref().cloned().map(Wrapper::from));
+            if let PatternFragment::Nested(PatternList::Choices(choices)) = &child.fragment {
+                parent_wrappers.push(Wrapper::Option);
             }
             populate_label_types_recursive(
                 child.fragment.children(),
                 parser_types,
                 label_types,
-                parent_wrapper.combine(child_wrapper),
+                seen_names,
+                parent_wrappers,
             );
         }
+        parent_wrappers.truncate(parent_wrappers_len);
     }
     Ok(())
 }
