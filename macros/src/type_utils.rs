@@ -32,6 +32,15 @@ fn is_unit(typ: &Type) -> bool {
     matches!(typ, Type::Tuple(tup) if tup.elems.len() == 0)
 }
 
+fn has_label(fragment: &PatternFragment) -> bool {
+    matches!(fragment, PatternFragment::Labeled(_))
+        || fragment
+            .children()
+            .into_iter()
+            .map(|p| &p.fragment)
+            .any(has_label)
+}
+
 pub struct ParserType {
     typ: Type,
     wrappers: VecDeque<Wrapper>,
@@ -233,41 +242,6 @@ fn parse_patterns(
             #(#parsers)*
             (#(#tuple_names),*)
         }
-    })
-}
-
-fn parse_patterns_top_level(
-    parser_name: String,
-    parser_context_name: Ident,
-    patterns: &Vec<Pattern>,
-    parser_types: Rc<HashMap<String, Type>>,
-) -> Result<TokenStream, syn::Error> {
-    // "[" thing=digit+ "]"
-    let label_types = get_label_types(patterns, &*parser_types)?;
-
-    // Define all variables for capture
-    let var_init: Vec<TokenStream> = label_types
-        .iter()
-        .map(|(var, pattern)| pattern.define(var))
-        .collect();
-
-    let state = CodegenState {
-        parser_context_name,
-        // TODO implement stack optimization
-        last_stack: syn::parse(quote! { TODO }.into()).unwrap(),
-        parser_name,
-        label_types,
-        current_capture: None,
-        parser_types: parser_types.clone(),
-    };
-
-    let mut parsers = vec![];
-    for pattern in patterns {
-        parsers.push(parse_pattern(pattern, &state));
-    }
-    Ok(quote! {
-        #(#var_init)*
-        #(#parsers)*
     })
 }
 
