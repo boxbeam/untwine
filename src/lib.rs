@@ -6,8 +6,6 @@ pub extern crate macros;
 
 pub mod any_stack;
 
-pub type Result<T> = std::result::Result<T, ParserError>;
-
 pub enum ParserError {
     ExpectedLiteral(&'static str),
     ExpectedToken(&'static str),
@@ -16,130 +14,48 @@ pub enum ParserError {
 pub struct ParserContext<'a> {
     cur: Cell<usize>,
     input: &'a str,
+    split: Cell<&'a AnySplit<'a>>,
 }
 
-pub trait Parser<T> {
-    fn parse(&self, ctx: &ParserContext) -> Result<T>;
-    fn map<V>(self, func: impl Fn(T) -> V) -> impl Parser<V>
+struct ParserImpl<'a, F, T, E>(F, PhantomData<&'a (T, E)>)
+where
+    F: Fn(&'a ParserContext<'a>) -> Result<T, E> + 'a,
+    T: 'a,
+    E: From<ParserError> + 'a;
+
+fn parser<'a, T, E>(
+    f: impl Fn(&'a ParserContext<'a>) -> Result<T, E> + 'a,
+) -> impl Parser<'a, T, E> + 'a
+where
+    T: 'a,
+    E: From<ParserError> + 'a,
+{
+    ParserImpl(f, PhantomData)
+}
+
+trait Parser<'a, T: 'a, E: From<ParserError> + 'a> {
+    fn parse(&self, ctx: &'a ParserContext<'a>) -> Result<T, E>;
+    fn map<V: 'a>(self, f: impl Fn(T) -> V + 'a) -> impl Parser<'a, V, E> + 'a
     where
-        Self: Sized,
+        Self: Sized + 'a,
     {
-        MapParser {
-            parser: self,
-            func,
-            phantom: PhantomData,
-        }
+        parser(move |ctx| self.parse(ctx).map(&f))
     }
-    fn optional(self) -> impl Parser<Option<T>>
+    fn optional(self) -> impl Parser<'a, Option<T>, E>
     where
-        Self: Sized,
+        Self: Sized + 'a,
     {
-        OptionalParser {
-            parser: self,
-            phantom: PhantomData,
-        }
-    }
-    fn repeating(self) -> impl Parser<Vec<T>>
-    where
-        Self: Sized,
-    {
-        RepeatingParser {
-            parser: self,
-            phantom: PhantomData,
-        }
-    }
-    fn optional_repeating(self) -> impl Parser<Vec<T>>
-    where
-        Self: Sized,
-    {
-        OptionalRepeatingParser {
-            parser: self,
-            phantom: PhantomData,
-        }
+        parser(move |ctx| Ok(self.parse(ctx).ok()))
     }
 }
 
-struct MapParser<A, B, F, P>
+impl<'a, F, T, E> Parser<'a, T, E> for ParserImpl<'a, F, T, E>
 where
-    F: Fn(A) -> B,
-    P: Parser<A>,
+    F: Fn(&'a ParserContext<'a>) -> Result<T, E>,
+    T: 'a,
+    E: From<ParserError> + 'a,
 {
-    parser: P,
-    func: F,
-    phantom: PhantomData<(A, B)>,
-}
-
-impl<A, B, F, P> Parser<B> for MapParser<A, B, F, P>
-where
-    F: Fn(A) -> B,
-    P: Parser<A>,
-{
-    fn parse(&self, ctx: &ParserContext) -> Result<B> {
-        self.parser.parse(ctx).map(&self.func)
-    }
-}
-
-struct OptionalParser<T, P>
-where
-    P: Parser<T>,
-{
-    parser: P,
-    phantom: PhantomData<T>,
-}
-
-impl<T, P> Parser<Option<T>> for OptionalParser<T, P>
-where
-    P: Parser<T>,
-{
-    fn parse(&self, ctx: &ParserContext) -> Result<Option<T>> {
-        let start = ctx.cur.get();
-        let res = self.parser.parse(ctx);
-        if res.is_err() {
-            ctx.cur.set(start);
-        }
-        Ok(res.ok())
-    }
-}
-
-struct RepeatingParser<T, P>
-where
-    P: Parser<T>,
-{
-    parser: P,
-    phantom: PhantomData<T>,
-}
-
-impl<T, P> Parser<Vec<T>> for RepeatingParser<T, P>
-where
-    P: Parser<T>,
-{
-    fn parse(&self, ctx: &ParserContext) -> Result<Vec<T>> {
-        let mut vec = vec![];
-        vec.push(self.parser.parse(ctx)?);
-        while let Ok(elem) = self.parser.parse(ctx) {
-            vec.push(elem);
-        }
-        Ok(vec)
-    }
-}
-
-struct OptionalRepeatingParser<T, P>
-where
-    P: Parser<T>,
-{
-    parser: P,
-    phantom: PhantomData<T>,
-}
-
-impl<T, P> Parser<Vec<T>> for OptionalRepeatingParser<T, P>
-where
-    P: Parser<T>,
-{
-    fn parse(&self, ctx: &ParserContext) -> Result<Vec<T>> {
-        let mut vec = vec![];
-        while let Ok(elem) = self.parser.parse(ctx) {
-            vec.push(elem);
-        }
-        Ok(vec)
+    fn parse(&self, ctx: &'a ParserContext<'a>) -> Result<T, E> {
+        (self.0)(ctx)
     }
 }

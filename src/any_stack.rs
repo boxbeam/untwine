@@ -44,7 +44,7 @@ pub struct AnySplit<'a> {
 
 impl<'a> AnySplit<'a> {
     /// Split a typed stack off the [AnyStack] head.
-    pub fn stack<T>(self) -> Stack<'a, T> {
+    pub fn stack<T>(&self) -> Stack<'a, T> {
         let mut stack = Stack::new(self.mem);
         stack.parent_split = self.parent_split;
         stack
