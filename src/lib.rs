@@ -1,3 +1,5 @@
+use std::{cell::Cell, marker::PhantomData};
+
 use any_stack::AnySplit;
 
 pub extern crate macros;
@@ -12,52 +14,132 @@ pub enum ParserError {
 }
 
 pub struct ParserContext<'a> {
-    original: &'a str,
-    cur: &'a str,
-    pub split: AnySplit<'a>,
+    cur: Cell<usize>,
+    input: &'a str,
 }
 
-impl<'a> ParserContext<'a> {
-    pub fn literal(&mut self, literal: &'static str, case_sensitive: bool) -> Result<()> {
-        if self.cur.len() < literal.len() {
-            return Err(ParserError::ExpectedLiteral(literal));
-        }
-        let found = if case_sensitive {
-            self.cur.starts_with(literal)
-        } else {
-            let a = self.cur.chars().map(|c| c.to_lowercase()).flatten();
-            let b = literal.chars().map(|c| c.to_lowercase()).flatten();
-            a.zip(b).all(|(a, b)| a == b)
-        };
-        if found {
-            self.cur = &self.cur[literal.len()..];
-            Ok(())
-        } else {
-            Err(ParserError::ExpectedLiteral(literal))
+pub trait Parser<T> {
+    fn parse(&self, ctx: &ParserContext) -> Result<T>;
+    fn map<V>(self, func: impl Fn(T) -> V) -> impl Parser<V>
+    where
+        Self: Sized,
+    {
+        MapParser {
+            parser: self,
+            func,
+            phantom: PhantomData,
         }
     }
-
-    pub fn char_filter(
-        &mut self,
-        filter: impl Fn(&char) -> bool,
-        token_name: &'static str,
-    ) -> Result<char> {
-        let c = self.cur.chars().next();
-        let res = c
-            .filter(filter)
-            .ok_or(ParserError::ExpectedToken(token_name));
-        if let Ok(c) = res {
-            self.cur = &self.cur[..c.len_utf8()];
+    fn optional(self) -> impl Parser<Option<T>>
+    where
+        Self: Sized,
+    {
+        OptionalParser {
+            parser: self,
+            phantom: PhantomData,
         }
-        res
     }
-
-    pub fn with_split(mut self, split: AnySplit<'a>) -> Self {
-        self.split = split;
-        self
+    fn repeating(self) -> impl Parser<Vec<T>>
+    where
+        Self: Sized,
+    {
+        RepeatingParser {
+            parser: self,
+            phantom: PhantomData,
+        }
     }
+    fn optional_repeating(self) -> impl Parser<Vec<T>>
+    where
+        Self: Sized,
+    {
+        OptionalRepeatingParser {
+            parser: self,
+            phantom: PhantomData,
+        }
+    }
+}
 
-    pub fn original(&self) -> &str {
-        self.original
+struct MapParser<A, B, F, P>
+where
+    F: Fn(A) -> B,
+    P: Parser<A>,
+{
+    parser: P,
+    func: F,
+    phantom: PhantomData<(A, B)>,
+}
+
+impl<A, B, F, P> Parser<B> for MapParser<A, B, F, P>
+where
+    F: Fn(A) -> B,
+    P: Parser<A>,
+{
+    fn parse(&self, ctx: &ParserContext) -> Result<B> {
+        self.parser.parse(ctx).map(&self.func)
+    }
+}
+
+struct OptionalParser<T, P>
+where
+    P: Parser<T>,
+{
+    parser: P,
+    phantom: PhantomData<T>,
+}
+
+impl<T, P> Parser<Option<T>> for OptionalParser<T, P>
+where
+    P: Parser<T>,
+{
+    fn parse(&self, ctx: &ParserContext) -> Result<Option<T>> {
+        let start = ctx.cur.get();
+        let res = self.parser.parse(ctx);
+        if res.is_err() {
+            ctx.cur.set(start);
+        }
+        Ok(res.ok())
+    }
+}
+
+struct RepeatingParser<T, P>
+where
+    P: Parser<T>,
+{
+    parser: P,
+    phantom: PhantomData<T>,
+}
+
+impl<T, P> Parser<Vec<T>> for RepeatingParser<T, P>
+where
+    P: Parser<T>,
+{
+    fn parse(&self, ctx: &ParserContext) -> Result<Vec<T>> {
+        let mut vec = vec![];
+        vec.push(self.parser.parse(ctx)?);
+        while let Ok(elem) = self.parser.parse(ctx) {
+            vec.push(elem);
+        }
+        Ok(vec)
+    }
+}
+
+struct OptionalRepeatingParser<T, P>
+where
+    P: Parser<T>,
+{
+    parser: P,
+    phantom: PhantomData<T>,
+}
+
+impl<T, P> Parser<Vec<T>> for OptionalRepeatingParser<T, P>
+where
+    P: Parser<T>,
+{
+    fn parse(&self, ctx: &ParserContext) -> Result<Vec<T>> {
+        let mut vec = vec![];
+        while let Ok(elem) = self.parser.parse(ctx) {
+            vec.push(elem);
+        }
+        Ok(vec)
     }
 }
