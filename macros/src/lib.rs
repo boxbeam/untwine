@@ -55,7 +55,7 @@ pub(crate) struct ParserDef {
     public: Option<Token![pub]>,
     name: Ident,
     colon: Token![:],
-    patterns: PatternList,
+    patterns: TopLevelPatterns,
     arrow: Token![->],
     return_type: Type,
     block: Block,
@@ -75,14 +75,28 @@ impl Parse for ParserDef {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub(crate) struct TopLevelPatterns {
+    patterns: Vec<LabeledPattern>,
+}
+
+impl Parse for TopLevelPatterns {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut patterns = vec![];
+        while !input.peek(Token![->]) {
+            patterns.push(input.parse()?);
+        }
+        Ok(TopLevelPatterns { patterns })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum PatternFragment {
     Literal(StringLiteral),
     CharRange(CharRange),
     CharGroup(CharGroup),
     CharFilter(CharFilter),
     ParserRef(Ident),
-    Labeled(Box<LabeledPattern>),
     Ignore(Box<IgnoredPattern>),
     Span(PatternList),
     Nested(PatternList),
@@ -106,8 +120,6 @@ impl Parse for PatternFragment {
         } else if input.peek(Token![.]) {
             input.parse::<Token![.]>()?;
             Ok(PatternFragment::AnyChar)
-        } else if input.peek(Ident) && input.peek2(Token![=]) {
-            input.parse().map(|v| PatternFragment::Labeled(Box::new(v)))
         } else if input.peek(Token![_]) {
             input.parse().map(|v| PatternFragment::Ignore(Box::new(v)))
         } else if input.peek(Token![<]) {
@@ -134,9 +146,6 @@ impl PatternFragment {
             PatternFragment::ParserRef(_) => {}
             PatternFragment::AnyChar => {}
             PatternFragment::Span(_) => {}
-            PatternFragment::Labeled(inner) => {
-                inner.pattern.fragment.walk(f);
-            }
             PatternFragment::Ignore(inner) => {
                 inner.pattern.fragment.walk(f);
             }
@@ -162,7 +171,6 @@ impl PatternFragment {
             PF::CharGroup(_) => vec![],
             PF::CharFilter(_) => vec![],
             PF::ParserRef(_) => vec![],
-            PF::Labeled(p) => vec![&p.as_ref().pattern],
             PF::Ignore(p) => vec![&p.as_ref().pattern],
             PF::Nested(PL::List(l)) | PF::Span(PL::List(l)) => l.iter().collect(),
             PF::Nested(PL::Choices(l)) | PF::Span(PL::Choices(l)) => l.iter().flatten().collect(),
@@ -171,7 +179,7 @@ impl PatternFragment {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Pattern {
     fragment: PatternFragment,
     modifier: Option<Modifier>,
@@ -192,7 +200,7 @@ mod kw {
     custom_keyword!(i);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct StringLiteral {
     case_sensitive: bool,
     string: LitStr,
@@ -209,7 +217,7 @@ impl Parse for StringLiteral {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct CharRange {
     inverted: bool,
     range: RangeInclusive<char>,
@@ -228,7 +236,7 @@ impl Parse for CharRange {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct CharGroup {
     inverted: bool,
     chars: Vec<char>,
@@ -247,7 +255,7 @@ impl Parse for CharGroup {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct CharFilter {
     expr: Expr,
 }
@@ -262,60 +270,38 @@ impl Parse for CharFilter {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct IgnoredPattern {
     pattern: Pattern,
 }
 
 impl Parse for IgnoredPattern {
     fn parse(input: ParseStream) -> Result<Self> {
-        input.parse::<Token![_]>();
-        input.parse::<Token![=]>();
-        let fragment: PatternFragment = input.parse()?;
-        Ok(IgnoredPattern {
-            pattern: Pattern {
-                fragment,
-                modifier: None,
-            },
-        })
+        input.parse::<Token![_]>()?;
+        let pattern = input.parse()?;
+        Ok(IgnoredPattern { pattern })
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct LabeledPattern {
-    label: Ident,
+    label: Option<Ident>,
     pattern: Pattern,
 }
 
 impl Parse for LabeledPattern {
     fn parse(input: ParseStream) -> Result<Self> {
-        let label: Ident = input.parse()?;
-        input.parse::<Token![=]>()?;
-        let fragment: PatternFragment = input.parse()?;
-        let mut inner_labeled = false;
-        fragment.walk(&mut |v| {
-            if matches!(v, PatternFragment::Labeled(_)) {
-                inner_labeled = true;
-            }
-        });
-        if inner_labeled {
-            Err(syn::Error::new(
-                label.span(),
-                "Cannot label a pattern which contains further labels",
-            ))
-        } else {
-            Ok(LabeledPattern {
-                label,
-                pattern: Pattern {
-                    fragment,
-                    modifier: None,
-                },
-            })
+        let mut label = None;
+        if input.peek2(Token![=]) {
+            label = Some(input.parse()?);
+            input.parse::<Token![=]>()?;
         }
+        let pattern: Pattern = input.parse()?;
+        Ok(LabeledPattern { label, pattern })
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum PatternList {
     List(Vec<Pattern>),
     Choices(Vec<Vec<Pattern>>),
@@ -345,6 +331,8 @@ pub(crate) enum Modifier {
     Optional,
     Repeating,
     OptionalRepeating,
+    Delimited(PatternFragment),
+    OptionalDelimited(PatternFragment),
 }
 
 impl Parse for Modifier {
@@ -355,6 +343,15 @@ impl Parse for Modifier {
             Ok(Modifier::Optional)
         } else if input.parse::<Option<Token![*]>>()?.is_some() {
             Ok(Modifier::OptionalRepeating)
+        } else if input.parse::<Option<Token![$]>>()?.is_some() {
+            let fragment = input.parse()?;
+            if input.peek(Token![+]) {
+                input.parse::<Token![+]>()?;
+                Ok(Modifier::Delimited(fragment))
+            } else {
+                input.parse::<Token![*]>()?;
+                Ok(Modifier::OptionalDelimited(fragment))
+            }
         } else {
             Err(input.error("expected modifier"))
         }

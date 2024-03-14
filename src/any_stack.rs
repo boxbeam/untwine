@@ -1,5 +1,6 @@
 use std::{
     cell::Cell,
+    marker::PhantomData,
     ops::{Deref, DerefMut},
     ptr::NonNull,
 };
@@ -10,6 +11,7 @@ use std::{
 /// and you must drop the child of a stack before splitting it again.
 pub struct AnyStack {
     stack: Box<[u8]>,
+    phantom: PhantomData<*const u8>,
 }
 
 impl AnyStack {
@@ -19,6 +21,7 @@ impl AnyStack {
     pub fn new(capacity: usize) -> Self {
         Self {
             stack: vec![0; capacity].into_boxed_slice(),
+            phantom: PhantomData,
         }
     }
 

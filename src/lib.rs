@@ -5,6 +5,7 @@ use any_stack::AnySplit;
 pub extern crate macros;
 
 pub mod any_stack;
+pub mod delimited_list;
 
 pub enum ParserError {
     ExpectedLiteral(&'static str),
@@ -33,17 +34,17 @@ where
     ParserImpl(f, PhantomData)
 }
 
-trait Parser<'a, T: 'a, E: From<ParserError> + 'a> {
-    fn parse(&self, ctx: &'a ParserContext<'a>) -> Result<T, E>;
-    fn map<V: 'a>(self, f: impl Fn(T) -> V + 'a) -> impl Parser<'a, V, E> + 'a
+trait Parser<'p, T: 'p, E: From<ParserError> + 'p> {
+    fn parse(&self, ctx: &'p ParserContext<'p>) -> Result<T, E>;
+    fn map<V: 'p>(self, f: impl Fn(T) -> V + 'p) -> impl Parser<'p, V, E> + 'p
     where
-        Self: Sized + 'a,
+        Self: Sized + 'p,
     {
         parser(move |ctx| self.parse(ctx).map(&f))
     }
-    fn optional(self) -> impl Parser<'a, Option<T>, E>
+    fn optional(self) -> impl Parser<'p, Option<T>, E>
     where
-        Self: Sized + 'a,
+        Self: Sized + 'p,
     {
         parser(move |ctx| Ok(self.parse(ctx).ok()))
     }
