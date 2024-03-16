@@ -43,7 +43,19 @@ where
     ParserImpl(f, PhantomData)
 }
 
-pub trait Parser<'p, T: 'p, E: From<ParserError> + 'p> {
+mod private {
+    pub trait SealedParser<T, E> {}
+}
+
+impl<'p, T, E, P> private::SealedParser<T, E> for P
+where
+    E: From<ParserError> + 'p,
+    P: Parser<'p, T, E>,
+    T: 'p,
+{
+}
+
+pub trait Parser<'p, T: 'p, E: From<ParserError> + 'p>: private::SealedParser<T, E> {
     fn parse(&self, ctx: &'p ParserContext<'p>) -> Result<T, E>;
 
     fn map<V: 'p>(self, f: impl Fn(T) -> V + 'p) -> impl Parser<'p, V, E> + 'p
