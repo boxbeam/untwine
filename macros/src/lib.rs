@@ -120,8 +120,9 @@ impl Parse for PatternFragment {
         } else if input.peek(Token![.]) {
             input.parse::<Token![.]>()?;
             Ok(PatternFragment::AnyChar)
-        } else if input.peek(Token![_]) {
-            input.parse().map(|v| PatternFragment::Ignore(Box::new(v)))
+        } else if input.peek(Token![#]) {
+            let ignored: IgnoredPattern = input.parse()?;
+            Ok(PatternFragment::Ignore(Box::new(ignored)))
         } else if input.peek(Token![<]) {
             input.parse::<Token![<]>()?;
             let patterns = input.parse()?;
@@ -277,7 +278,7 @@ pub(crate) struct IgnoredPattern {
 
 impl Parse for IgnoredPattern {
     fn parse(input: ParseStream) -> Result<Self> {
-        input.parse::<Token![_]>()?;
+        input.parse::<Token![#]>()?;
         let pattern = input.parse()?;
         Ok(IgnoredPattern { pattern })
     }
