@@ -34,23 +34,23 @@ fn is_unit(typ: &Type) -> bool {
 
 struct CodegenState {
     parser_context_name: Ident,
-    last_stack: Ident,
     parser_name: String,
     label_types: Vec<(Ident, Type)>,
     current_capture: Option<Ident>,
     parser_types: Rc<HashMap<String, Type>>,
 }
 
-fn parse_fragment(fragment: &PatternFragment, state: &CodegenState) -> TokenStream {
+fn parse_fragment(
+    fragment: &PatternFragment,
+    state: &CodegenState,
+    capture: bool,
+) -> syn::Result<TokenStream> {
     let ctx = &state.parser_context_name;
-    let last_stack = &state.last_stack;
     let parser_name = &state.parser_name;
-    match fragment {
+    let stream = match fragment {
         PatternFragment::Literal(lit) => {
-            let literal = &lit.string;
-            let case_sensitive = lit.case_sensitive;
             quote! {
-                #ctx.literal(#literal, #case_sensitive)?
+                untwine::literal(#lit)
             }
         }
         PatternFragment::CharRange(range) => {
@@ -58,7 +58,7 @@ fn parse_fragment(fragment: &PatternFragment, state: &CodegenState) -> TokenStre
             let range_min = range.range.start();
             let range_max = range.range.end();
             quote! {
-                #ctx.char_filter(|c| #inverted (#range_min ..= #range_max).contains(c), #parser_name)?
+                untwine::char_filter(|c| #inverted (#range_min ..= #range_max).contains(c), #parser_name)
             }
         }
         PatternFragment::CharGroup(group) => {
@@ -69,79 +69,117 @@ fn parse_fragment(fragment: &PatternFragment, state: &CodegenState) -> TokenStre
             };
             let chars: String = group.chars.iter().collect();
             quote! {
-                #ctx.char_filter(|c| #inverted #chars.contains(c), #parser_name)?
+                untwine::char_filter(|c| #inverted #chars.contains(c), #parser_name)
             }
         }
         PatternFragment::CharFilter(filter) => {
             let filter = &filter.expr;
             quote! {
-                #ctx.char_filter(#filter, #parser_name)?
+                untwine::char_filter(#filter, #parser_name)?
             }
         }
         PatternFragment::ParserRef(parser) => {
             quote! {
-                #parser(#ctx.with_split(#last_stack.any()))?
+                untwine::parser(|ctx| #parser(ctx))
             }
         }
         PatternFragment::Ignore(pattern) => {
-            let parse_inner = parse_fragment(&pattern.pattern.fragment, state);
-            quote! { drop(#parse_inner) }
+            let parse_inner = parse_pattern(&pattern.pattern, state, false)?;
+            quote! { #parse_inner.ignore() }
         }
         PatternFragment::Span(span) => {
-            let parse_inner = parse_pattern_list(span, state);
+            let parse_inner = parse_pattern_list(span, state, false)?;
             quote! {
-                {
-                    let start = #ctx.cur;
-                    #parse_inner;
-                    start[..start.len() - #ctx.cur.len()]
-                }
+                #parse_inner.span()
             }
         }
-        PatternFragment::Nested(list) => parse_pattern_list(list, state),
+        PatternFragment::Nested(list) => parse_pattern_list(list, state, capture)?,
         PatternFragment::AnyChar => {
             quote! {#ctx.char_filter(|_| true, "more content")}
         }
+    };
+    Ok(stream)
+}
+
+fn parse_pattern(
+    pattern: &Pattern,
+    state: &CodegenState,
+    capture: bool,
+) -> syn::Result<TokenStream> {
+    let fragment_parser = parse_fragment(&pattern.fragment, state, capture)?;
+
+    Ok(match &pattern.modifier {
+        Some(Modifier::Optional) => quote! {#fragment_parser.optional()},
+        Some(Modifier::Repeating) => quote! {#fragment_parser.repeating()},
+        Some(Modifier::OptionalRepeating) => quote! {#fragment_parser.optional_repeating()},
+        Some(Modifier::Delimited(delimiter)) => {
+            let delimiter_parser = parse_fragment(delimiter, state, false)?;
+            quote! {#fragment_parser.delimited(#delimiter_parser)}
+        }
+        Some(Modifier::OptionalDelimited(delimiter)) => {
+            let delimiter_parser = parse_fragment(delimiter, state, false)?;
+            quote! {#fragment_parser.optional_delimited(#delimiter_parser)}
+        }
+        None => fragment_parser,
+    })
+}
+
+fn parse_pattern_list(
+    patterns: &PatternList,
+    state: &CodegenState,
+    capture: bool,
+) -> syn::Result<TokenStream> {
+    match patterns {
+        PatternList::List(list) => parse_patterns(list, state, capture),
+        PatternList::Choices(choices) => parse_pattern_choices(choices, state, capture),
     }
 }
 
-fn parse_pattern(pattern: &Pattern, state: &CodegenState) -> TokenStream {
-    // Parse pattern fragment and wrap in any necessary modifier logic
-    todo!()
-}
-
-fn children(list: &PatternList) -> Vec<&Pattern> {
-    match list {
-        PatternList::List(patterns) => patterns.iter().collect(),
-        PatternList::Choices(choices) => choices.iter().flatten().collect(),
+fn parse_pattern_choices(
+    patterns: &Vec<Vec<Pattern>>,
+    state: &CodegenState,
+    capture: bool,
+) -> syn::Result<TokenStream> {
+    let first = parse_patterns(&patterns[0], state, capture)?;
+    let mut rest = vec![];
+    for parser in patterns[1..].iter() {
+        rest.push(parse_patterns(parser, state, capture)?);
     }
-}
 
-fn parse_pattern_list(patterns: &PatternList, state: &CodegenState) -> TokenStream {
-    todo!()
+    Ok(quote! {
+        #first #( .or(#rest) )*
+    })
 }
 
 fn parse_patterns(
     patterns: &Vec<Pattern>,
     state: &CodegenState,
-) -> Result<TokenStream, syn::Error> {
-    let mut tuple_params = 0;
+    capture: bool,
+) -> syn::Result<TokenStream> {
     let mut parsers = vec![];
-    for pattern in patterns {
-        let typ = get_type(pattern, &state.parser_types)?;
-        let prefix = (!is_unit(&typ)).then(|| {
-            let ident = numbered_ident(tuple_params);
-            tuple_params += 1;
-            quote! {let #ident =}
-        });
-        let parse = parse_fragment(&pattern.fragment, state);
-        parsers.push(quote! {#prefix #parse});
-    }
-    let tuple_names = (0..tuple_params).map(numbered_ident);
-    Ok(quote! {
-        {
-            #(#parsers)*
-            (#(#tuple_names),*)
+    let mut captured = vec![];
+    for (i, pattern) in patterns.iter().enumerate() {
+        let parser = parse_pattern(pattern, state, capture)?;
+        let ident = numbered_ident(i);
+        let ctx = &state.parser_context_name;
+
+        let parser = quote! {
+            let #ident = #parser.parse(#ctx)?;
+        };
+        parsers.push(parser);
+
+        let parser_type = pattern_type(pattern, &state.parser_types)?;
+        if capture && !is_unit(&parser_type) {
+            captured.push(ident);
         }
+    }
+    Ok(quote! {
+        untwine::parser(|ctx| {
+            #(
+                #parsers
+            )*
+            Ok(( #(#captured),* ))
+        })
     })
 }
 
@@ -155,9 +193,9 @@ fn fragment_type(
 ) -> syn::Result<Type> {
     use PatternFragment as P;
     let tokens = match fragment {
-        P::Literal(_) | P::Span(_) => quote! {&str},
+        P::Span(_) => quote! {&str},
         P::CharRange(_) | P::CharGroup(_) | P::AnyChar | P::CharFilter(_) => quote! {char},
-        P::Ignore(_) => quote! {()},
+        P::Ignore(_) | P::Literal(_) => quote! {()},
         P::ParserRef(ident) => return Ok(parser_types[&ident.to_string()].clone()),
         P::Nested(PatternList::List(l)) => return Ok(list_type(l, parser_types)?),
         P::Nested(PatternList::Choices(c)) => return Ok(list_type(&c[0], parser_types)?),
@@ -168,7 +206,7 @@ fn fragment_type(
 fn list_type(patterns: &Vec<Pattern>, parser_types: &HashMap<String, Type>) -> syn::Result<Type> {
     let mut tuple = vec![];
     for pattern in patterns {
-        let typ = get_type(pattern, parser_types)?;
+        let typ = pattern_type(pattern, parser_types)?;
         if !is_unit(&typ) {
             tuple.push(typ);
         }
@@ -182,7 +220,7 @@ fn list_type(patterns: &Vec<Pattern>, parser_types: &HashMap<String, Type>) -> s
     Ok(syn::parse(tokens.into()).unwrap())
 }
 
-pub fn get_type(pattern: &Pattern, parser_types: &HashMap<String, Type>) -> syn::Result<Type> {
+pub fn pattern_type(pattern: &Pattern, parser_types: &HashMap<String, Type>) -> syn::Result<Type> {
     let typ = fragment_type(&pattern.fragment, parser_types)?;
     let typ = match pattern.modifier {
         Some(Modifier::Optional) => option_of(&typ),

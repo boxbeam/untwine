@@ -1,7 +1,5 @@
 use std::{cell::Cell, marker::PhantomData};
 
-use any_stack::AnySplit;
-
 pub extern crate macros;
 
 pub mod any_stack;
@@ -70,6 +68,13 @@ pub trait Parser<'p, T: 'p, E: From<ParserError> + 'p>: private::SealedParser<T,
         Self: Sized + 'p,
     {
         parser(move |ctx| Ok(self.parse(ctx).ok()))
+    }
+
+    fn or(self, other: impl Parser<'p, T, E> + 'p + Sized) -> impl Parser<'p, T, E>
+    where
+        Self: Sized + 'p,
+    {
+        parser(move |ctx| self.parse(ctx).or_else(|_| other.parse(ctx)))
     }
 
     fn repeating(self) -> impl Parser<'p, Vec<T>, E>

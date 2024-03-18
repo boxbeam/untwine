@@ -10,10 +10,10 @@ use syn::{
     parse_macro_input,
     token::{Brace, Bracket, Paren},
     visit::Visit,
-    Block, Expr, Ident, Lit, LitChar, LitStr, MacroDelimiter, Result, Token, Type,
+    Block, Expr, Ident, Lit, LitChar, LitStr, MacroDelimiter, Result, Token, Type, Visibility,
 };
 
-mod type_utils;
+mod codegen;
 
 #[derive(Debug)]
 pub(crate) struct Header {
@@ -52,7 +52,7 @@ impl Parse for ParserBlock {
 
 #[derive(Debug)]
 pub(crate) struct ParserDef {
-    public: Option<Token![pub]>,
+    vis: Visibility,
     name: Ident,
     colon: Token![:],
     patterns: TopLevelPatterns,
@@ -64,7 +64,7 @@ pub(crate) struct ParserDef {
 impl Parse for ParserDef {
     fn parse(input: ParseStream) -> Result<Self> {
         Ok(ParserDef {
-            public: input.parse()?,
+            vis: input.parse()?,
             name: input.parse()?,
             colon: input.parse()?,
             patterns: input.parse()?,
@@ -92,7 +92,7 @@ impl Parse for TopLevelPatterns {
 
 #[derive(Debug, Clone)]
 pub(crate) enum PatternFragment {
-    Literal(StringLiteral),
+    Literal(LitStr),
     CharRange(CharRange),
     CharGroup(CharGroup),
     CharFilter(CharFilter),
@@ -199,23 +199,6 @@ mod kw {
     use syn::custom_keyword;
 
     custom_keyword!(i);
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct StringLiteral {
-    case_sensitive: bool,
-    string: LitStr,
-}
-
-impl Parse for StringLiteral {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let case_insensitive: Option<kw::i> = input.parse()?;
-        let string: LitStr = input.parse()?;
-        Ok(StringLiteral {
-            case_sensitive: case_insensitive.is_none(),
-            string,
-        })
-    }
 }
 
 #[derive(Debug, Clone)]
