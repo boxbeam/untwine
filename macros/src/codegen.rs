@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    hash::{DefaultHasher, Hash, Hasher},
     ops::Deref,
     rc::Rc,
 };
@@ -207,11 +208,12 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
 
     let block = &parser.block;
     Ok(quote! {
-        #vis fn #name(#ctx: &untwine::ParserContext) -> Result<#typ, untwine::ParserError> {
+        #vis fn #name<'a>(#ctx: &'a untwine::ParserContext<'a>) -> Result<#typ, untwine::ParserError> {
             #(
                 #parsers
             )*
 
+            #[allow(unused_braces)]
             Ok(#block)
         }
     })
@@ -230,7 +232,10 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
         .filter(|p| !matches!(p.vis, Visibility::Inherited))
         .map(|p| p.name.to_string() + "_")
         .collect();
-    let parser_name = Ident::new(&format!("__parser_{parser_name}"), Span::call_site());
+    let mut hasher = DefaultHasher::new();
+    parser_name.hash(&mut hasher);
+    let hash = hasher.finish();
+    let parser_name = Ident::new(&format!("__parser_{hash}"), Span::call_site());
 
     let mut state = CodegenState {
         parser_context_name: block
