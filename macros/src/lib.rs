@@ -18,8 +18,6 @@ mod codegen;
 #[derive(Debug)]
 pub(crate) struct Header {
     ctx_name: Ident,
-    colon: Token![:],
-    ctx_type: Type,
 }
 
 impl Parse for Header {
@@ -28,8 +26,6 @@ impl Parse for Header {
         bracketed!(content in input);
         Ok(Header {
             ctx_name: content.parse()?,
-            colon: content.parse()?,
-            ctx_type: content.parse()?,
         })
     }
 }

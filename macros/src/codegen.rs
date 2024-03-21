@@ -9,10 +9,11 @@ use quote::{quote, TokenStreamExt};
 use syn::{
     punctuated::Punctuated,
     token::{Gt, Lt},
-    AngleBracketedGenericArguments, Path, PathArguments, PathSegment, Type, TypePath, TypeTuple,
+    AngleBracketedGenericArguments, Path, PathArguments, PathSegment, Result, Type, TypePath,
+    TypeTuple, Visibility,
 };
 
-use crate::{Modifier, Pattern, PatternFragment, PatternList};
+use crate::{Modifier, ParserBlock, ParserDef, Pattern, PatternFragment, PatternList};
 
 pub fn option_of(typ: &Type) -> Type {
     let tokens = quote! {
@@ -35,16 +36,14 @@ fn is_unit(typ: &Type) -> bool {
 struct CodegenState {
     parser_context_name: Ident,
     parser_name: String,
-    label_types: Vec<(Ident, Type)>,
-    current_capture: Option<Ident>,
-    parser_types: Rc<HashMap<String, Type>>,
+    parser_types: HashMap<String, Type>,
 }
 
 fn parse_fragment(
     fragment: &PatternFragment,
     state: &CodegenState,
     capture: bool,
-) -> syn::Result<TokenStream> {
+) -> Result<TokenStream> {
     let ctx = &state.parser_context_name;
     let parser_name = &state.parser_name;
     let stream = match fragment {
@@ -101,11 +100,7 @@ fn parse_fragment(
     Ok(stream)
 }
 
-fn parse_pattern(
-    pattern: &Pattern,
-    state: &CodegenState,
-    capture: bool,
-) -> syn::Result<TokenStream> {
+fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Result<TokenStream> {
     let fragment_parser = parse_fragment(&pattern.fragment, state, capture)?;
 
     Ok(match &pattern.modifier {
@@ -128,7 +123,7 @@ fn parse_pattern_list(
     patterns: &PatternList,
     state: &CodegenState,
     capture: bool,
-) -> syn::Result<TokenStream> {
+) -> Result<TokenStream> {
     match patterns {
         PatternList::List(list) => parse_patterns(list, state, capture),
         PatternList::Choices(choices) => parse_pattern_choices(choices, state, capture),
@@ -139,7 +134,7 @@ fn parse_pattern_choices(
     patterns: &Vec<Vec<Pattern>>,
     state: &CodegenState,
     capture: bool,
-) -> syn::Result<TokenStream> {
+) -> Result<TokenStream> {
     let first = parse_patterns(&patterns[0], state, capture)?;
     let mut rest = vec![];
     for parser in patterns[1..].iter() {
@@ -155,7 +150,7 @@ fn parse_patterns(
     patterns: &Vec<Pattern>,
     state: &CodegenState,
     capture: bool,
-) -> syn::Result<TokenStream> {
+) -> Result<TokenStream> {
     let mut parsers = vec![];
     let mut captured = vec![];
     for (i, pattern) in patterns.iter().enumerate() {
@@ -183,14 +178,85 @@ fn parse_patterns(
     })
 }
 
+fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<TokenStream> {
+    let vis = &parser.vis;
+    let name = &parser.name;
+    let ctx = &state.parser_context_name;
+    let typ = &parser.return_type;
+
+    let mut parsers = vec![];
+
+    for pattern in &parser.patterns.patterns {
+        let prefix = pattern
+            .label
+            .clone()
+            .map(|ident| quote! {let #ident =})
+            .unwrap_or_default();
+        let parser = parse_pattern(&pattern.pattern, state, true)?;
+        parsers.push(quote! {#prefix #parser.parse(#ctx)?;});
+    }
+
+    let block = &parser.block;
+    Ok(quote! {
+        #vis fn #name(#ctx: untwine::ParserContext) -> Result<#typ, untwine::ParserError> {
+            use untwine::{parser, Parser, literal, char_filter};
+
+            #(
+                #parsers
+            )*
+
+            Ok(#block)
+        }
+    })
+}
+
+fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
+    let parser_types = block
+        .parsers
+        .iter()
+        .map(|parser| (parser.name.to_string(), parser.return_type.clone()))
+        .collect();
+
+    let mut state = CodegenState {
+        parser_context_name: block
+            .header
+            .map(|header| header.ctx_name)
+            .unwrap_or_else(|| Ident::new("ctx", Span::call_site())),
+        parser_name: Default::default(),
+        parser_types,
+    };
+
+    let mut parsers = vec![];
+    let mut exports = vec![];
+    for parser in block.parsers {
+        state.parser_name = parser.name.to_string();
+        parsers.push(generate_parser_function(&parser, &state)?);
+        if !matches!(parser.vis, Visibility::Inherited) {
+            let vis = parser.vis;
+            let name = parser.name;
+            exports.push(quote! {
+                #vis use __parser::#name;
+            })
+        }
+    }
+
+    Ok(quote! {
+        mod __parser {
+            #(
+                #parsers
+            )*
+        }
+        #(
+            #exports
+        )*
+    })
+}
+
 fn numbered_ident(num: usize) -> Ident {
     Ident::new(&format!("_{num}"), Span::call_site())
 }
 
-fn fragment_type(
-    fragment: &PatternFragment,
-    parser_types: &HashMap<String, Type>,
-) -> syn::Result<Type> {
+fn fragment_type(fragment: &PatternFragment, parser_types: &HashMap<String, Type>) -> Result<Type> {
     use PatternFragment as P;
     let tokens = match fragment {
         P::Span(_) => quote! {&str},
@@ -203,7 +269,7 @@ fn fragment_type(
     Ok(syn::parse(tokens.into()).unwrap())
 }
 
-fn list_type(patterns: &Vec<Pattern>, parser_types: &HashMap<String, Type>) -> syn::Result<Type> {
+fn list_type(patterns: &Vec<Pattern>, parser_types: &HashMap<String, Type>) -> Result<Type> {
     let mut tuple = vec![];
     for pattern in patterns {
         let typ = pattern_type(pattern, parser_types)?;
@@ -220,7 +286,7 @@ fn list_type(patterns: &Vec<Pattern>, parser_types: &HashMap<String, Type>) -> s
     Ok(syn::parse(tokens.into()).unwrap())
 }
 
-pub fn pattern_type(pattern: &Pattern, parser_types: &HashMap<String, Type>) -> syn::Result<Type> {
+pub fn pattern_type(pattern: &Pattern, parser_types: &HashMap<String, Type>) -> Result<Type> {
     let typ = fragment_type(&pattern.fragment, parser_types)?;
     let typ = match pattern.modifier {
         Some(Modifier::Optional) => option_of(&typ),
@@ -233,10 +299,4 @@ pub fn pattern_type(pattern: &Pattern, parser_types: &HashMap<String, Type>) -> 
         None => typ,
     };
     Ok(typ)
-}
-
-fn extend_front<T>(vec: &mut VecDeque<T>, elems: impl IntoIterator<Item = T>) {
-    for elem in elems {
-        vec.push_front(elem);
-    }
 }
