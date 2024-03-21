@@ -5,6 +5,7 @@ pub extern crate macros;
 pub mod any_stack;
 pub mod delimited_list;
 
+#[derive(Debug)]
 pub enum ParserError {
     ExpectedLiteral(&'static str),
     ExpectedChar(&'static str),
@@ -16,6 +17,13 @@ pub struct ParserContext<'a> {
 }
 
 impl<'a> ParserContext<'a> {
+    pub fn new(input: &'a str) -> Self {
+        ParserContext {
+            cur: Default::default(),
+            input,
+        }
+    }
+
     pub fn slice(&self) -> &str {
         &self.input[self.cur.get()..]
     }
@@ -31,7 +39,7 @@ where
     T: 'a,
     E: From<ParserError> + 'a;
 
-fn parser<'a, T, E>(
+pub fn parser<'a, T, E>(
     f: impl Fn(&'a ParserContext<'a>) -> Result<T, E> + 'a,
 ) -> impl Parser<'a, T, E> + 'a
 where
@@ -158,7 +166,7 @@ pub trait Parser<'p, T: 'p, E: From<ParserError> + 'p>: private::SealedParser<T,
     }
 }
 
-pub fn literal<E>(s: &'static str) -> impl Parser<(), E>
+pub fn literal<'p, E>(s: &'static str) -> impl Parser<'p, (), E>
 where
     E: From<ParserError> + 'static,
 {

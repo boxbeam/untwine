@@ -198,7 +198,7 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
 
     let block = &parser.block;
     Ok(quote! {
-        #vis fn #name(#ctx: untwine::ParserContext) -> Result<#typ, untwine::ParserError> {
+        #vis fn #name(#ctx: &untwine::ParserContext) -> Result<#typ, untwine::ParserError> {
             #(
                 #parsers
             )*
@@ -208,7 +208,7 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
     })
 }
 
-fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
+pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
     let parser_types = block
         .parsers
         .iter()

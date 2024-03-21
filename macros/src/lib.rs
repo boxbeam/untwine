@@ -361,23 +361,8 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
     }
 }
 
-#[derive(Default)]
-struct IdentVisitor(Vec<Ident>);
-
-impl<'ast> Visit<'ast> for IdentVisitor {
-    fn visit_ident(&mut self, i: &'ast Ident) {
-        self.0.push(i.clone());
-    }
-}
-
 #[proc_macro]
 pub fn parser(input: TokenStream) -> TokenStream {
-    let header: ParserBlock = parse_macro_input!(input as ParserBlock);
-    for parser in &header.parsers {
-        let mut visitor = IdentVisitor::default();
-        visitor.visit_block(&parser.block);
-        let IdentVisitor(idents) = visitor;
-    }
-    println!("{header:#?}");
-    quote! {}.into()
+    let block: ParserBlock = parse_macro_input!(input as ParserBlock);
+    codegen::generate_parser_block(block).unwrap().into()
 }
