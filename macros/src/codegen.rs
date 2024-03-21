@@ -199,8 +199,6 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
     let block = &parser.block;
     Ok(quote! {
         #vis fn #name(#ctx: untwine::ParserContext) -> Result<#typ, untwine::ParserError> {
-            use untwine::{parser, Parser, literal, char_filter};
-
             #(
                 #parsers
             )*
@@ -216,6 +214,14 @@ fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
         .iter()
         .map(|parser| (parser.name.to_string(), parser.return_type.clone()))
         .collect();
+
+    let parser_name: String = block
+        .parsers
+        .iter()
+        .filter(|p| !matches!(p.vis, Visibility::Inherited))
+        .map(|p| p.name.to_string() + "_")
+        .collect();
+    let parser_name = Ident::new(&format!("__parser_{parser_name}"), Span::call_site());
 
     let mut state = CodegenState {
         parser_context_name: block
@@ -235,13 +241,15 @@ fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
             let vis = parser.vis;
             let name = parser.name;
             exports.push(quote! {
-                #vis use __parser::#name;
+                #vis use #parser_name::#name;
             })
         }
     }
 
     Ok(quote! {
-        mod __parser {
+        mod #parser_name {
+            use untwine::{parser, Parser, literal, char_filter};
+
             #(
                 #parsers
             )*
