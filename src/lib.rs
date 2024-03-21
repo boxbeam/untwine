@@ -1,9 +1,8 @@
 use std::{cell::Cell, marker::PhantomData};
 
-pub extern crate macros;
-
 pub mod any_stack;
 pub mod delimited_list;
+pub use macros::parser;
 
 #[derive(Debug)]
 pub enum ParserError {
