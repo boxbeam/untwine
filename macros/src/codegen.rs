@@ -74,7 +74,7 @@ fn parse_fragment(
         PatternFragment::CharFilter(filter) => {
             let filter = &filter.expr;
             quote! {
-                untwine::char_filter(#filter, #parser_name)?
+                untwine::char_filter(#filter, #parser_name)
             }
         }
         PatternFragment::ParserRef(parser) => {
@@ -101,7 +101,16 @@ fn parse_fragment(
 }
 
 fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Result<TokenStream> {
-    let fragment_parser = parse_fragment(&pattern.fragment, state, capture)?;
+    let mut fragment_parser = parse_fragment(&pattern.fragment, state, capture)?;
+
+    if !capture
+        && pattern
+            .modifier
+            .as_ref()
+            .is_some_and(|modifier| modifier.is_repeating())
+    {
+        fragment_parser = quote! {#fragment_parser.ignore()};
+    }
 
     Ok(match &pattern.modifier {
         Some(Modifier::Optional) => quote! {#fragment_parser.optional()},

@@ -1,8 +1,8 @@
 use untwine::{macros::parser, ParserContext};
 
 parser! {
-    pub lit: thing=<"test"> -> String {
-        thing.to_string()
+    pub lit: thing=<{char::is_ascii_digit}+> -> String {
+        format!("{thing:?}")
     }
 }
 
@@ -21,7 +21,7 @@ fn main() {
     //     map: "{" entries=mapEntry$comma* "}" -> JSONValue { Map(entries.into_iter().collect()) }
     //     pub json: (int | float | bool | string | null | list | map) -> JSONValue { json }
     // }
-    let input = "tes";
+    let input = "1234";
     let ctx = ParserContext::new(input);
     let output = lit(&ctx).unwrap();
     println!("{output}");

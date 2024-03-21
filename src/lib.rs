@@ -29,7 +29,7 @@ impl<'a> ParserContext<'a> {
     }
 
     pub fn advance(&self, bytes: usize) {
-        self.cur.set(self.input.len().max(self.cur.get() + bytes));
+        self.cur.set(self.input.len().min(self.cur.get() + bytes));
     }
 }
 
@@ -180,10 +180,10 @@ where
     })
 }
 
-pub fn char_filter<E>(
+pub fn char_filter<'p, E>(
     f: impl Fn(&char) -> bool + 'static,
     token_name: &'static str,
-) -> impl Parser<'static, char, E>
+) -> impl Parser<'p, char, E>
 where
     E: From<ParserError> + 'static,
 {

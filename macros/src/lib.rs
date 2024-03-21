@@ -315,6 +315,18 @@ pub(crate) enum Modifier {
     OptionalDelimited(PatternFragment),
 }
 
+impl Modifier {
+    fn is_repeating(&self) -> bool {
+        match self {
+            Modifier::Optional => false,
+            Modifier::Repeating => true,
+            Modifier::OptionalRepeating => true,
+            Modifier::Delimited(_) => true,
+            Modifier::OptionalDelimited(_) => true,
+        }
+    }
+}
+
 impl Parse for Modifier {
     fn parse(input: ParseStream) -> Result<Self> {
         if input.parse::<Option<Token![+]>>()?.is_some() {
