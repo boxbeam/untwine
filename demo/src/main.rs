@@ -1,30 +1,47 @@
+use std::collections::HashMap;
+
 use untwine::{parser, ParserContext};
 
+#[derive(Debug)]
+pub enum JSONValue {
+    String(String),
+    Null,
+    Int(i128),
+    Float(f64),
+    Bool(bool),
+    List(Vec<JSONValue>),
+    Map(HashMap<String, JSONValue>),
+}
+
+impl JSONValue {
+    pub fn string(self) -> Option<String> {
+        match self {
+            JSONValue::String(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
 parser! {
-    int = <{char::is_ascii_digit}+> -> &str;
     sep = #{char::is_ascii_whitespace}*;
     comma = sep? "," sep?;
-
-    pub lit: thing=int$comma+ -> Vec<&str> { thing }
+    int: num=<"-"? '0'-'9'+> -> JSONValue { JSONValue::Int(num.parse().unwrap()) }
+    float: num=<"-"? '0'-'9'+ "." '0'-'9'+> -> JSONValue { JSONValue::Float(num.parse().unwrap()) }
+    str_char: ch=<"\\" . | [^"\""]> -> char { ch.chars().last().unwrap() }
+    str: "\"" chars=str_char* "\"" -> JSONValue { JSONValue::String(chars.into_iter().collect()) }
+    null: "null" -> JSONValue { JSONValue::Null }
+    bool: bool=<"true" | "false"> -> JSONValue { JSONValue::Bool(bool == "true") }
+    list: "[" values=json$comma* "]" -> JSONValue { JSONValue::List(values) }
+    map_entry: key=str sep? ":" sep? value=json -> (String, JSONValue) { (key.string().unwrap(), value) }
+    map: "{" values=map_entry$comma* "}" -> JSONValue { JSONValue::Map(values.into_iter().collect()) }
+    pub json = (bool | null | float | str | float | int | list | map) -> JSONValue;
 }
 
 fn main() {
-    // parser! {
-    //     pub sep: #{char::is_whitespace}* -> () {}
-    //     comma: sep "," sep -> () {}
-    //     int: <"-"? '0'-'9'+> -> JSONValue { Int(int.parse()?) }
-    //     float: <"-"? '0'-'9'+ ("." '0'-'9'+)?> -> JSONValue { Float(float.parse()?) }
-    //     str_char: <("\\" . | [^"\""])> -> char { str_char.chars().last().unwrap() /* doesn't handle escape seqs properly */ }
-    //     string: "\"" str_char+ "\"" -> JSONValue { String(str_char.iter().cloned().collect()) }
-    //     null: "null" -> JSONValue { Null }
-    //     bool: ("true" | "false") -> JSONValue { Bool(bool == "true") }
-    //     list: "[" elems=json$comma* "]" -> JSONValue { List(elems) }
-    //     mapEntry: string sep ":" sep json -> (JSONValue, JSONValue) { (string, json) }
-    //     map: "{" entries=mapEntry$comma* "}" -> JSONValue { Map(entries.into_iter().collect()) }
-    //     pub json: (int | float | bool | string | null | list | map) -> JSONValue { json }
-    // }
-    let input = "1, 2, 3, 4";
-    let ctx = ParserContext::new(input);
-    let output = lit(&ctx).unwrap();
-    println!("{output:?}");
+    for line in std::io::stdin().lines() {
+        let line = line.unwrap();
+        let ctx = ParserContext::new(&line);
+        let output = json(&ctx).unwrap();
+        println!("---\n{output:#?}\n---");
+    }
 }

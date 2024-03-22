@@ -163,6 +163,20 @@ pub trait Parser<'p, T: 'p, E: From<ParserError> + 'p>: private::SealedParser<T,
             Ok(&ctx.input[start..ctx.cur.get()])
         })
     }
+
+    fn unilateral(self) -> impl Parser<'p, T, E>
+    where
+        Self: Sized + 'p,
+    {
+        parser(move |ctx| {
+            let start = ctx.cur.get();
+            let res = self.parse(ctx);
+            if res.is_err() {
+                ctx.cur.set(start);
+            }
+            res
+        })
+    }
 }
 
 pub fn literal<'p, E>(s: &'static str) -> impl Parser<'p, (), E>

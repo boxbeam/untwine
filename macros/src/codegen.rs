@@ -75,7 +75,7 @@ fn parse_fragment(
             };
             let chars: String = group.chars.iter().collect();
             quote! {
-                untwine::char_filter(|c| #inverted #chars.contains(c), #parser_name)
+                untwine::char_filter(|c| #inverted #chars.contains(*c), #parser_name)
             }
         }
         PatternFragment::CharFilter(filter) => {
@@ -101,7 +101,7 @@ fn parse_fragment(
         }
         PatternFragment::Nested(list) => parse_pattern_list(list, state, capture)?,
         PatternFragment::AnyChar => {
-            quote! {#ctx.char_filter(|_| true, "more content")}
+            quote! {untwine::char_filter(|_| true, "any character")}
         }
     };
     Ok(stream)
@@ -197,7 +197,7 @@ fn parse_patterns(
                 #parsers
             )*
             Ok(( #(#captured),* ))
-        })
+        }).unilateral()
     })
 }
 
