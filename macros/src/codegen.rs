@@ -17,6 +17,9 @@ use syn::{
 use crate::{Modifier, ParserBlock, ParserDef, Pattern, PatternFragment, PatternList};
 
 pub fn option_of(typ: &Type) -> Type {
+    if is_unit(typ) {
+        return typ.clone();
+    }
     let tokens = quote! {
         Option<#typ>
     };
@@ -24,6 +27,9 @@ pub fn option_of(typ: &Type) -> Type {
 }
 
 pub fn vec_of(typ: &Type) -> Type {
+    if is_unit(typ) {
+        return typ.clone();
+    }
     let tokens = quote! {
         Vec<#typ>
     };
@@ -113,8 +119,10 @@ fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Resu
         fragment_parser = quote! {#fragment_parser.ignore()};
     }
 
-    Ok(match &pattern.modifier {
-        Some(Modifier::Optional) => quote! {#fragment_parser.optional()},
+    let mut pattern_parser = match &pattern.modifier {
+        Some(Modifier::Optional) => {
+            quote! {#fragment_parser.optional()}
+        }
         Some(Modifier::Repeating) => quote! {#fragment_parser.repeating()},
         Some(Modifier::OptionalRepeating) => quote! {#fragment_parser.optional_repeating()},
         Some(Modifier::Delimited(delimiter)) => {
@@ -126,7 +134,12 @@ fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Resu
             quote! {#fragment_parser.optional_delimited(#delimiter_parser)}
         }
         None => fragment_parser,
-    })
+    };
+
+    if is_unit(&fragment_type(&pattern.fragment, &state.parser_types)?) {
+        pattern_parser = quote! {#pattern_parser.ignore()}
+    }
+    Ok(pattern_parser)
 }
 
 fn parse_pattern_list(
@@ -202,18 +215,23 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
             .clone()
             .map(|ident| quote! {let #ident =})
             .unwrap_or_default();
-        let parser = parse_pattern(&pattern.pattern, state, true)?;
+        let parser = parse_pattern(&pattern.pattern, state, pattern.label.is_some())?;
         parsers.push(quote! {#prefix #parser.parse(#ctx)?;});
     }
 
     let block = &parser.block;
+    let block = if block.stmts.len() == 1 {
+        let stmt = &block.stmts[0];
+        quote! {#stmt}
+    } else {
+        quote! {#block}
+    };
     Ok(quote! {
-        #vis fn #name<'a>(#ctx: &'a untwine::ParserContext<'a>) -> Result<#typ, untwine::ParserError> {
+        #vis fn #name<'p>(#ctx: &'p untwine::ParserContext<'p>) -> Result<#typ, untwine::ParserError> {
             #(
                 #parsers
             )*
 
-            #[allow(unused_braces)]
             Ok(#block)
         }
     })
@@ -262,6 +280,7 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
 
     Ok(quote! {
         mod #parser_name {
+            use super::*;
             use untwine::{parser, Parser, literal, char_filter};
 
             #(

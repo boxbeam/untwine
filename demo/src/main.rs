@@ -1,10 +1,11 @@
 use untwine::{parser, ParserContext};
 
 parser! {
-    int: num=<{char::is_ascii_digit}+> -> &str { num }
-    pub lit: thing=int$","+ -> String {
-        format!("{thing:?}")
-    }
+    int = <{char::is_ascii_digit}+> -> &str;
+    sep = #{char::is_ascii_whitespace}*;
+    comma = sep? "," sep?;
+
+    pub lit: thing=int$comma+ -> Vec<&str> { thing }
 }
 
 fn main() {
@@ -22,8 +23,8 @@ fn main() {
     //     map: "{" entries=mapEntry$comma* "}" -> JSONValue { Map(entries.into_iter().collect()) }
     //     pub json: (int | float | bool | string | null | list | map) -> JSONValue { json }
     // }
-    let input = "1,2,3,4";
+    let input = "1, 2, 3, 4";
     let ctx = ParserContext::new(input);
     let output = lit(&ctx).unwrap();
-    println!("{output}");
+    println!("{output:?}");
 }

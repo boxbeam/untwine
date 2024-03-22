@@ -8,6 +8,7 @@ use syn::{
     braced, bracketed, custom_keyword, parenthesized,
     parse::{discouraged::Speculative, Parse, ParseStream},
     parse_macro_input,
+    spanned::Spanned,
     token::{Brace, Bracket, Paren},
     visit::Visit,
     Block, Expr, Ident, Lit, LitChar, LitStr, MacroDelimiter, Result, Token, Type, Visibility,
@@ -50,23 +51,59 @@ impl Parse for ParserBlock {
 pub(crate) struct ParserDef {
     vis: Visibility,
     name: Ident,
-    colon: Token![:],
     patterns: TopLevelPatterns,
-    arrow: Token![->],
     return_type: Type,
     block: Block,
 }
 
 impl Parse for ParserDef {
     fn parse(input: ParseStream) -> Result<Self> {
+        let vis = input.parse()?;
+        let name: Ident = input.parse()?;
+        let colon = input
+            .parse::<Token![:]>()
+            .map(|_| true)
+            .or_else(|_| input.parse::<Token![=]>().map(|_| false))?;
+        let mut patterns: TopLevelPatterns = input.parse()?;
+        let return_type: Type = if input.parse::<Token![->]>().is_ok() {
+            input.parse()?
+        } else {
+            syn::parse(quote! {()}.into())?
+        };
+
+        let block = if colon {
+            input.parse()?
+        } else {
+            input.parse::<Token![;]>()?;
+            if let Some(label) = patterns.patterns.iter().flat_map(|p| p.label.iter()).next() {
+                return Err(syn::Error::new(
+                    label.span(),
+                    "Cannot use explicit labels here (implicitly captured by = at beginning)",
+                ));
+            }
+
+            let pattern = Pattern {
+                fragment: PatternFragment::Nested(PatternList::List(
+                    patterns.patterns.into_iter().map(|p| p.pattern).collect(),
+                )),
+                modifier: None,
+            };
+
+            patterns = TopLevelPatterns {
+                patterns: vec![LabeledPattern {
+                    label: Some(name.clone()),
+                    pattern,
+                }],
+            };
+
+            syn::parse(quote! {{#name}}.into())?
+        };
         Ok(ParserDef {
-            vis: input.parse()?,
-            name: input.parse()?,
-            colon: input.parse()?,
-            patterns: input.parse()?,
-            arrow: input.parse()?,
-            return_type: input.parse()?,
-            block: input.parse()?,
+            vis,
+            name,
+            patterns,
+            return_type,
+            block,
         })
     }
 }
@@ -79,7 +116,7 @@ pub(crate) struct TopLevelPatterns {
 impl Parse for TopLevelPatterns {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut patterns = vec![];
-        while !input.peek(Token![->]) {
+        while !input.peek(Token![->]) && !input.peek(Token![;]) {
             patterns.push(input.parse()?);
         }
         Ok(TopLevelPatterns { patterns })
