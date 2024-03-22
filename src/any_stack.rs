@@ -67,7 +67,7 @@ impl<'a> Drop for AnySplit<'a> {
 pub struct Stack<'a, T> {
     mem: NonNull<[u8]>,
     int: &'a mut [T],
-    len: usize,
+    len: Cell<usize>,
     skip_bytes: usize,
     split: Cell<bool>,
     parent_split: Option<&'a Cell<bool>>,
@@ -77,13 +77,13 @@ impl<'a, T> Deref for Stack<'a, T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
-        &self.int[..self.len]
+        &self.int[..self.len.get()]
     }
 }
 
 impl<'a, T> DerefMut for Stack<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.int[..self.len]
+        &mut self.int[..self.len.get()]
     }
 }
 
@@ -94,7 +94,7 @@ impl<'a, T> Stack<'a, T> {
         Stack {
             mem: stack,
             int,
-            len: 0,
+            len: Default::default(),
             skip_bytes: before.len(),
             split: Default::default(),
             parent_split: None,
@@ -105,7 +105,7 @@ impl<'a, T> Stack<'a, T> {
         if self.split.get() {
             panic!("Stack was split from twice");
         }
-        let pos = (std::mem::size_of::<T>() * self.len) + self.skip_bytes;
+        let pos = (std::mem::size_of::<T>() * self.len.get()) + self.skip_bytes;
         // Safe because the [u8] is only stored behind a pointer instead of a reference
         // because the &mut [T] is an alias to the same data, but rust has no way of knowing that.
         // This just prevents it from "looking like" there are two mutable borrows of the same data.
@@ -122,6 +122,27 @@ impl<'a, T> Stack<'a, T> {
         stack
     }
 
+    pub fn into_vec(&self) -> Vec<T> {
+        let mut vec = Vec::with_capacity(self.len.get());
+        for elem in self.iter() {
+            vec.push(unsafe { std::ptr::read(elem as *const T) });
+        }
+        self.len.set(0);
+        vec
+    }
+
+    pub fn into_iter(&'a self) -> impl Iterator<Item = T> + 'a {
+        let iter = (*self)
+            .iter()
+            .map(|ptr| unsafe { std::ptr::read(ptr as *const T) });
+        self.len.set(0);
+        iter
+    }
+
+    pub fn collect<C: FromIterator<T>>(&self) -> C {
+        self.into_iter().collect()
+    }
+
     /// Split off the head without any specific stack type, so it can be chosen by the receiver.
     pub fn split_any(&self) -> AnySplit {
         AnySplit {
@@ -132,19 +153,19 @@ impl<'a, T> Stack<'a, T> {
 
     /// Push an element onto the stack.
     pub fn push(&mut self, val: T) {
-        self.int[self.len] = val;
-        self.len += 1;
+        self.int[self.len.get()] = val;
+        *self.len.get_mut() += 1;
     }
 
     /// Remove the top element from the stack.
     pub fn pop(&mut self) -> Option<T> {
-        if self.len == 0 {
+        if self.len.get() == 0 {
             return None;
         }
         // Safe because this data's destructor will never be run and it will never be accessed
         // again except to overwrite it with valid data
-        let elem = unsafe { std::ptr::read(&self.int[self.len]) };
-        self.len -= 1;
+        let elem = unsafe { std::ptr::read(&self.int[self.len.get()]) };
+        *self.len.get_mut() -= 1;
         Some(elem)
     }
 }
