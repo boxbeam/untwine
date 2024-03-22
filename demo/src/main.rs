@@ -27,7 +27,7 @@ parser! {
     comma = sep? "," sep?;
     int: num=<"-"? '0'-'9'+> -> JSONValue { JSONValue::Int(num.parse().unwrap()) }
     float: num=<"-"? '0'-'9'+ "." '0'-'9'+> -> JSONValue { JSONValue::Float(num.parse().unwrap()) }
-    str_char: ch=<"\\" . | [^"\""]> -> char { ch.chars().last().unwrap() }
+    str_char = ("\\" . | [^"\""]) -> char;
     str: "\"" chars=str_char* "\"" -> JSONValue { JSONValue::String(chars.into_iter().collect()) }
     null: "null" -> JSONValue { JSONValue::Null }
     bool: bool=<"true" | "false"> -> JSONValue { JSONValue::Bool(bool == "true") }
