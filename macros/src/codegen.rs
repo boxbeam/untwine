@@ -174,6 +174,10 @@ fn parse_patterns(
     state: &CodegenState,
     capture: bool,
 ) -> Result<TokenStream> {
+    if patterns.len() == 1 {
+        return parse_pattern(&patterns[0], state, capture);
+    }
+
     let mut parsers = vec![];
     let mut captured = vec![];
     for (i, pattern) in patterns.iter().enumerate() {
