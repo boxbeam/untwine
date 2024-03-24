@@ -193,8 +193,9 @@ fn parse_patterns(
     }
     let err = &state.error_type;
     let data = &state.data_type;
+    let ctx = &state.parser_context_name;
     Ok(quote! {
-        untwine::parser::<#data, _, #err>(|ctx| {
+        untwine::parser::<#data, _, #err>(|#ctx| {
             #(
                 #parsers
             )*
