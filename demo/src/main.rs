@@ -39,15 +39,15 @@ parser! {
     [error = ParseJSONError]
     sep = #{char::is_ascii_whitespace}*;
     comma = sep? "," sep?;
-    int: num=<"-"? '0'-'9'+> -> JSONValue { JSONValue::Int(num.parse()?) }
+    int: num = <"-"? '0'-'9'+> -> JSONValue { JSONValue::Int(num.parse()?) }
     float: num=<"-"? '0'-'9'+ "." '0'-'9'+> -> JSONValue { JSONValue::Float(num.parse()?) }
     str_char = ("\\" . | [^"\""]) -> char;
     str: "\"" chars=str_char* "\"" -> JSONValue { JSONValue::String(chars.into_iter().collect()) }
     null: "null" -> JSONValue { JSONValue::Null }
     bool: bool=<"true" | "false"> -> JSONValue { JSONValue::Bool(bool == "true") }
-    list: "[" values=json$comma* "]" -> JSONValue { JSONValue::List(values) }
+    list: "[" sep values=json$comma* sep "]" -> JSONValue { JSONValue::List(values) }
     map_entry: key=str sep? ":" sep? value=json -> (String, JSONValue) { (key.string().unwrap(), value) }
-    map: "{" values=map_entry$comma* "}" -> JSONValue { JSONValue::Map(values.into_iter().collect()) }
+    map: "{" sep values=map_entry$comma* sep "}" -> JSONValue { JSONValue::Map(values.into_iter().collect()) }
     pub json = (bool | null | float | str | float | int | list | map) -> JSONValue;
 }
 
@@ -56,6 +56,6 @@ fn main() {
         let line = line.unwrap();
         let ctx = ParserContext::new(&line, ());
         let output = json(&ctx).unwrap();
-        println!("---\n{output:#?}\n---");
+        println!("{output:#?}");
     }
 }
