@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    num::{ParseFloatError, ParseIntError},
+};
 
 use untwine::{parser, ParserContext};
 
@@ -22,11 +25,22 @@ impl JSONValue {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+enum ParseJSONError {
+    #[error("Syntax error: {0:?}")]
+    Untwine(#[from] untwine::ParserError),
+    #[error("Failed to parse number: {0}")]
+    ParseInt(#[from] ParseIntError),
+    #[error("Failed to parse number: {0}")]
+    ParseFloat(#[from] ParseFloatError),
+}
+
 parser! {
+    [error = ParseJSONError]
     sep = #{char::is_ascii_whitespace}*;
     comma = sep? "," sep?;
-    int: num=<"-"? '0'-'9'+> -> JSONValue { JSONValue::Int(num.parse().unwrap()) }
-    float: num=<"-"? '0'-'9'+ "." '0'-'9'+> -> JSONValue { JSONValue::Float(num.parse().unwrap()) }
+    int: num=<"-"? '0'-'9'+> -> JSONValue { JSONValue::Int(num.parse()?) }
+    float: num=<"-"? '0'-'9'+ "." '0'-'9'+> -> JSONValue { JSONValue::Float(num.parse()?) }
     str_char = ("\\" . | [^"\""]) -> char;
     str: "\"" chars=str_char* "\"" -> JSONValue { JSONValue::String(chars.into_iter().collect()) }
     null: "null" -> JSONValue { JSONValue::Null }

@@ -4,10 +4,12 @@ pub mod any_stack;
 pub mod delimited_list;
 pub use macros::parser;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ParserError {
+    #[error("Expected literal '{0}'")]
     ExpectedLiteral(&'static str),
-    ExpectedChar(&'static str),
+    #[error("Expected {0}")]
+    ExpectedToken(&'static str),
 }
 
 pub struct ParserContext<'a> {
@@ -208,7 +210,7 @@ where
                 return Ok(next);
             }
         };
-        Err(ParserError::ExpectedChar(token_name).into())
+        Err(ParserError::ExpectedToken(token_name).into())
     })
 }
 

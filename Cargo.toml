@@ -1,4 +1,9 @@
-workspace = { members = ["demo", "macros"] }
+[workspace]
+members = ["demo", "macros"] 
+
+[workspace.dependencies]
+thiserror = {version = "1.0.58"}
+
 [package]
 name = "untwine"
 version = "0.1.0"
@@ -14,3 +19,5 @@ proc-macro2 = "1.0.78"
 quote = "1.0.35"
 syn = { version = "2.0.48", features = ["full", "parsing", "extra-traits", "visit"] }
 macros = {path = "macros"}
+thiserror = {workspace = true}
+

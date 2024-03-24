@@ -1,46 +1,87 @@
-#![allow(unused)]
 use std::ops::RangeInclusive;
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
 use syn::{
-    braced, bracketed, custom_keyword, parenthesized,
+    braced, bracketed, parenthesized,
     parse::{discouraged::Speculative, Parse, ParseStream},
     parse_macro_input,
-    spanned::Spanned,
     token::{Brace, Bracket, Paren},
-    visit::Visit,
-    Block, Expr, Ident, Lit, LitChar, LitStr, MacroDelimiter, Result, Token, Type, Visibility,
+    Block, Expr, Ident, LitChar, LitStr, Result, Token, Type, Visibility,
 };
 
 mod codegen;
 
+mod kw {
+    use syn::custom_keyword;
+
+    custom_keyword!(i);
+    custom_keyword!(error);
+    custom_keyword!(context);
+}
+
 #[derive(Debug)]
 pub(crate) struct Header {
     ctx_name: Ident,
+    error_type: Type,
+}
+
+#[derive(Debug)]
+pub(crate) enum HeaderParam {
+    ContextName(Ident),
+    ErrorType(Type),
+}
+
+impl Parse for HeaderParam {
+    fn parse(input: ParseStream) -> Result<Self> {
+        if input.parse::<kw::error>().is_ok() {
+            input.parse::<Token![=]>()?;
+            Ok(HeaderParam::ErrorType(input.parse()?))
+        } else if input.parse::<kw::context>().is_ok() {
+            input.parse::<Token![=]>()?;
+            Ok(HeaderParam::ContextName(input.parse()?))
+        } else {
+            Err(input.error("expected parameter name 'error' or 'context'"))
+        }
+    }
 }
 
 impl Parse for Header {
     fn parse(input: ParseStream) -> Result<Self> {
-        let content;
-        bracketed!(content in input);
+        let mut ctx_name = Ident::new("__ctx", Span::call_site());
+        let mut error_type = syn::parse(quote! {untwine::ParserError}.into())?;
+        if input.peek(Bracket) {
+            let content;
+            bracketed!(content in input);
+            while !content.is_empty() {
+                let param: HeaderParam = content.parse()?;
+                match param {
+                    HeaderParam::ContextName(name) => ctx_name = name,
+                    HeaderParam::ErrorType(typ) => error_type = typ,
+                }
+                if !content.is_empty() {
+                    content.parse::<Token![,]>()?;
+                }
+            }
+        }
         Ok(Header {
-            ctx_name: content.parse()?,
+            ctx_name,
+            error_type,
         })
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct ParserBlock {
-    header: Option<Header>,
+    header: Header,
     parsers: Vec<ParserDef>,
 }
 
 impl Parse for ParserBlock {
     fn parse(input: ParseStream) -> Result<Self> {
         let block = ParserBlock {
-            header: optional(input),
+            header: input.parse()?,
             parsers: list(input, false, |i| i.is_empty())?,
         };
         Ok(block)
@@ -169,50 +210,6 @@ impl Parse for PatternFragment {
     }
 }
 
-impl PatternFragment {
-    pub fn walk(&self, f: &mut impl FnMut(&PatternFragment)) {
-        f(self);
-        match self {
-            PatternFragment::Literal(_) => {}
-            PatternFragment::CharRange(_) => {}
-            PatternFragment::CharGroup(_) => {}
-            PatternFragment::CharFilter(_) => {}
-            PatternFragment::ParserRef(_) => {}
-            PatternFragment::AnyChar => {}
-            PatternFragment::Span(_) => {}
-            PatternFragment::Ignore(inner) => {
-                inner.pattern.fragment.walk(f);
-            }
-            PatternFragment::Nested(PatternList::List(list)) => {
-                for pat in list {
-                    pat.fragment.walk(f);
-                }
-            }
-            PatternFragment::Nested(PatternList::Choices(choices)) => {
-                for pat in choices.iter().flatten() {
-                    pat.fragment.walk(f);
-                }
-            }
-        }
-    }
-
-    pub fn children(&self) -> Vec<&Pattern> {
-        use PatternFragment as PF;
-        use PatternList as PL;
-        match self {
-            PF::Literal(_) => vec![],
-            PF::CharRange(_) => vec![],
-            PF::CharGroup(_) => vec![],
-            PF::CharFilter(_) => vec![],
-            PF::ParserRef(_) => vec![],
-            PF::Ignore(p) => vec![&p.as_ref().pattern],
-            PF::Nested(PL::List(l)) | PF::Span(PL::List(l)) => l.iter().collect(),
-            PF::Nested(PL::Choices(l)) | PF::Span(PL::Choices(l)) => l.iter().flatten().collect(),
-            PF::AnyChar => vec![],
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct Pattern {
     fragment: PatternFragment,
@@ -226,12 +223,6 @@ impl Parse for Pattern {
             modifier: optional(input),
         })
     }
-}
-
-mod kw {
-    use syn::custom_keyword;
-
-    custom_keyword!(i);
 }
 
 #[derive(Debug, Clone)]
@@ -413,5 +404,9 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 #[proc_macro]
 pub fn parser(input: TokenStream) -> TokenStream {
     let block: ParserBlock = parse_macro_input!(input as ParserBlock);
-    codegen::generate_parser_block(block).unwrap().into()
+
+    match codegen::generate_parser_block(block) {
+        Ok(stream) => stream.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
 }

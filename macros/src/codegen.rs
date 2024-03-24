@@ -1,18 +1,11 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::HashMap,
     hash::{DefaultHasher, Hash, Hasher},
-    ops::Deref,
-    rc::Rc,
 };
 
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::{quote, TokenStreamExt};
-use syn::{
-    punctuated::Punctuated,
-    token::{Gt, Lt},
-    AngleBracketedGenericArguments, Path, PathArguments, PathSegment, Result, Type, TypePath,
-    TypeTuple, Visibility,
-};
+use quote::quote;
+use syn::{Result, Type, Visibility};
 
 use crate::{Modifier, ParserBlock, ParserDef, Pattern, PatternFragment, PatternList};
 
@@ -42,6 +35,7 @@ fn is_unit(typ: &Type) -> bool {
 
 struct CodegenState {
     parser_context_name: Ident,
+    error_type: Type,
     parser_name: String,
     parser_types: HashMap<String, Type>,
 }
@@ -51,20 +45,21 @@ fn parse_fragment(
     state: &CodegenState,
     capture: bool,
 ) -> Result<TokenStream> {
-    let ctx = &state.parser_context_name;
     let parser_name = &state.parser_name;
     let stream = match fragment {
         PatternFragment::Literal(lit) => {
+            let err = &state.error_type;
             quote! {
-                untwine::literal(#lit)
+                untwine::literal::<#err>(#lit)
             }
         }
         PatternFragment::CharRange(range) => {
             let inverted = range.inverted.then(|| quote! {!});
             let range_min = range.range.start();
             let range_max = range.range.end();
+            let err = &state.error_type;
             quote! {
-                untwine::char_filter(|c| #inverted (#range_min ..= #range_max).contains(c), #parser_name)
+                untwine::char_filter::<#err>(|c| #inverted (#range_min ..= #range_max).contains(c), #parser_name)
             }
         }
         PatternFragment::CharGroup(group) => {
@@ -74,19 +69,22 @@ fn parse_fragment(
                 quote! {}
             };
             let chars: String = group.chars.iter().collect();
+            let err = &state.error_type;
             quote! {
-                untwine::char_filter(|c| #inverted #chars.contains(*c), #parser_name)
+                untwine::char_filter::<#err>(|c| #inverted #chars.contains(*c), #parser_name)
             }
         }
         PatternFragment::CharFilter(filter) => {
             let filter = &filter.expr;
+            let err = &state.error_type;
             quote! {
-                untwine::char_filter(#filter, #parser_name)
+                untwine::char_filter::<#err>(#filter, #parser_name)
             }
         }
         PatternFragment::ParserRef(parser) => {
+            let err = &state.error_type;
             quote! {
-                untwine::parser(|ctx| #parser(ctx))
+                untwine::parser::<_, #err>(|ctx| #parser(ctx))
             }
         }
         PatternFragment::Ignore(pattern) => {
@@ -101,7 +99,8 @@ fn parse_fragment(
         }
         PatternFragment::Nested(list) => parse_pattern_list(list, state, capture)?,
         PatternFragment::AnyChar => {
-            quote! {untwine::char_filter(|_| true, "any character")}
+            let err = &state.error_type;
+            quote! {untwine::char_filter::<#err>(|_| true, "any character")}
         }
     };
     Ok(stream)
@@ -195,8 +194,9 @@ fn parse_patterns(
             captured.push(ident);
         }
     }
+    let err = &state.error_type;
     Ok(quote! {
-        untwine::parser(|ctx| {
+        untwine::parser::<_, #err>(|ctx| {
             #(
                 #parsers
             )*
@@ -210,6 +210,7 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
     let name = &parser.name;
     let ctx = &state.parser_context_name;
     let typ = &parser.return_type;
+    let err = &state.error_type;
 
     let mut parsers = vec![];
 
@@ -231,7 +232,7 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
         quote! {#block}
     };
     Ok(quote! {
-        #vis fn #name<'p>(#ctx: &'p untwine::ParserContext<'p>) -> Result<#typ, untwine::ParserError> {
+        #vis fn #name<'p>(#ctx: &'p untwine::ParserContext<'p>) -> Result<#typ, #err> {
             #(
                 #parsers
             )*
@@ -260,10 +261,8 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
     let parser_name = Ident::new(&format!("__parser_{hash}"), Span::call_site());
 
     let mut state = CodegenState {
-        parser_context_name: block
-            .header
-            .map(|header| header.ctx_name)
-            .unwrap_or_else(|| Ident::new("ctx", Span::call_site())),
+        parser_context_name: block.header.ctx_name,
+        error_type: block.header.error_type,
         parser_name: Default::default(),
         parser_types,
     };
@@ -307,11 +306,19 @@ fn fragment_type(fragment: &PatternFragment, parser_types: &HashMap<String, Type
         P::Span(_) => quote! {&str},
         P::CharRange(_) | P::CharGroup(_) | P::AnyChar | P::CharFilter(_) => quote! {char},
         P::Ignore(_) | P::Literal(_) => quote! {()},
-        P::ParserRef(ident) => return Ok(parser_types[&ident.to_string()].clone()),
+        P::ParserRef(ident) => {
+            let Some(typ) = parser_types.get(&ident.to_string()) else {
+                return Err(syn::Error::new_spanned(
+                    ident,
+                    "Reference to undefined parser",
+                ));
+            };
+            return Ok(typ.clone());
+        }
         P::Nested(PatternList::List(l)) => return Ok(list_type(l, parser_types)?),
         P::Nested(PatternList::Choices(c)) => return Ok(list_type(&c[0], parser_types)?),
     };
-    Ok(syn::parse(tokens.into()).unwrap())
+    Ok(syn::parse(tokens.into())?)
 }
 
 fn list_type(patterns: &Vec<Pattern>, parser_types: &HashMap<String, Type>) -> Result<Type> {
@@ -328,7 +335,7 @@ fn list_type(patterns: &Vec<Pattern>, parser_types: &HashMap<String, Type>) -> R
             #(#tuple),*
         )
     };
-    Ok(syn::parse(tokens.into()).unwrap())
+    Ok(syn::parse(tokens.into())?)
 }
 
 pub fn pattern_type(pattern: &Pattern, parser_types: &HashMap<String, Type>) -> Result<Type> {

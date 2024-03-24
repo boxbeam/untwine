@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 untwine = {path = ".."}
+thiserror = {workspace = true}
