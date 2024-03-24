@@ -54,7 +54,7 @@ parser! {
 fn main() {
     for line in std::io::stdin().lines() {
         let line = line.unwrap();
-        let ctx = ParserContext::new(&line);
+        let ctx = ParserContext::new(&line, ());
         let output = json(&ctx).unwrap();
         println!("---\n{output:#?}\n---");
     }

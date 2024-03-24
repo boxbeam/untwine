@@ -19,18 +19,21 @@ mod kw {
     custom_keyword!(i);
     custom_keyword!(error);
     custom_keyword!(context);
+    custom_keyword!(data);
 }
 
 #[derive(Debug)]
 pub(crate) struct Header {
     ctx_name: Ident,
     error_type: Type,
+    data_type: Type,
 }
 
 #[derive(Debug)]
 pub(crate) enum HeaderParam {
     ContextName(Ident),
     ErrorType(Type),
+    DataType(Type),
 }
 
 impl Parse for HeaderParam {
@@ -41,6 +44,9 @@ impl Parse for HeaderParam {
         } else if input.parse::<kw::context>().is_ok() {
             input.parse::<Token![=]>()?;
             Ok(HeaderParam::ContextName(input.parse()?))
+        } else if input.parse::<kw::data>().is_ok() {
+            input.parse::<Token![=]>()?;
+            Ok(HeaderParam::DataType(input.parse()?))
         } else {
             Err(input.error("expected parameter name 'error' or 'context'"))
         }
@@ -51,6 +57,7 @@ impl Parse for Header {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut ctx_name = Ident::new("__ctx", Span::call_site());
         let mut error_type = syn::parse(quote! {untwine::ParserError}.into())?;
+        let mut data_type = syn::parse(quote! {()}.into())?;
         if input.peek(Bracket) {
             let content;
             bracketed!(content in input);
@@ -59,6 +66,7 @@ impl Parse for Header {
                 match param {
                     HeaderParam::ContextName(name) => ctx_name = name,
                     HeaderParam::ErrorType(typ) => error_type = typ,
+                    HeaderParam::DataType(typ) => data_type = typ,
                 }
                 if !content.is_empty() {
                     content.parse::<Token![,]>()?;
@@ -68,6 +76,7 @@ impl Parse for Header {
         Ok(Header {
             ctx_name,
             error_type,
+            data_type,
         })
     }
 }

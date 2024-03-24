@@ -1,4 +1,8 @@
-use std::{cell::Cell, marker::PhantomData};
+use std::{
+    cell::{Cell, RefCell},
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
 pub mod any_stack;
 pub mod delimited_list;
@@ -12,16 +16,18 @@ pub enum ParserError {
     ExpectedToken(&'static str),
 }
 
-pub struct ParserContext<'a> {
+pub struct ParserContext<'p, C = ()> {
     cur: Cell<usize>,
-    input: &'a str,
+    input: &'p str,
+    data: RefCell<C>,
 }
 
-impl<'a> ParserContext<'a> {
-    pub fn new(input: &'a str) -> Self {
+impl<'p, C> ParserContext<'p, C> {
+    pub fn new(input: &'p str, data: C) -> Self {
         ParserContext {
             cur: Default::default(),
             input,
+            data: RefCell::new(data),
         }
     }
 
@@ -32,61 +38,73 @@ impl<'a> ParserContext<'a> {
     pub fn advance(&self, bytes: usize) {
         self.cur.set(self.input.len().min(self.cur.get() + bytes));
     }
+
+    pub fn data(&self) -> impl Deref<Target = C> + '_ {
+        self.data.borrow()
+    }
+
+    pub fn data_mut(&self) -> impl DerefMut<Target = C> + '_ {
+        self.data.borrow_mut()
+    }
 }
 
-struct ParserImpl<'a, F, T, E>(F, PhantomData<&'a (T, E)>)
+struct ParserImpl<'p, F, C, T, E>(F, PhantomData<&'p (C, T, E)>)
 where
-    F: Fn(&'a ParserContext<'a>) -> Result<T, E> + 'a,
-    T: 'a,
-    E: From<ParserError> + 'a;
+    F: Fn(&'p ParserContext<'p, C>) -> Result<T, E> + 'p,
+    T: 'p,
+    E: From<ParserError> + 'p;
 
-pub fn parser<'a, T, E>(
-    f: impl Fn(&'a ParserContext<'a>) -> Result<T, E> + 'a,
-) -> impl Parser<'a, T, E> + 'a
+pub fn parser<'p, C, T, E>(
+    f: impl Fn(&'p ParserContext<'p, C>) -> Result<T, E> + 'p,
+) -> impl Parser<'p, C, T, E> + 'p
 where
-    T: 'a,
-    E: From<ParserError> + 'a,
+    C: 'p,
+    T: 'p,
+    E: From<ParserError> + 'p,
 {
     ParserImpl(f, PhantomData)
 }
 
 mod private {
-    pub trait SealedParser<T, E> {}
+    pub trait SealedParser<C, T, E> {}
 }
 
-impl<'p, T, E, P> private::SealedParser<T, E> for P
+impl<'p, C, T, E, P> private::SealedParser<C, T, E> for P
 where
+    C: 'p,
     E: From<ParserError> + 'p,
-    P: Parser<'p, T, E>,
+    P: Parser<'p, C, T, E>,
     T: 'p,
 {
 }
 
-pub trait Parser<'p, T: 'p, E: From<ParserError> + 'p>: private::SealedParser<T, E> {
-    fn parse(&self, ctx: &'p ParserContext<'p>) -> Result<T, E>;
+pub trait Parser<'p, C: 'p, T: 'p, E: From<ParserError> + 'p>:
+    private::SealedParser<C, T, E>
+{
+    fn parse(&self, ctx: &'p ParserContext<'p, C>) -> Result<T, E>;
 
-    fn map<V: 'p>(self, f: impl Fn(T) -> V + 'p) -> impl Parser<'p, V, E> + 'p
+    fn map<V: 'p>(self, f: impl Fn(T) -> V + 'p) -> impl Parser<'p, C, V, E> + 'p
     where
         Self: Sized + 'p,
     {
         parser(move |ctx| self.parse(ctx).map(&f))
     }
 
-    fn optional(self) -> impl Parser<'p, Option<T>, E>
+    fn optional(self) -> impl Parser<'p, C, Option<T>, E>
     where
         Self: Sized + 'p,
     {
         parser(move |ctx| Ok(self.parse(ctx).ok()))
     }
 
-    fn or(self, other: impl Parser<'p, T, E> + 'p + Sized) -> impl Parser<'p, T, E>
+    fn or(self, other: impl Parser<'p, C, T, E> + 'p + Sized) -> impl Parser<'p, C, T, E>
     where
         Self: Sized + 'p,
     {
         parser(move |ctx| self.parse(ctx).or_else(|_| other.parse(ctx)))
     }
 
-    fn repeating(self) -> impl Parser<'p, Vec<T>, E>
+    fn repeating(self) -> impl Parser<'p, C, Vec<T>, E>
     where
         Self: Sized + 'p,
     {
@@ -100,7 +118,7 @@ pub trait Parser<'p, T: 'p, E: From<ParserError> + 'p>: private::SealedParser<T,
         })
     }
 
-    fn optional_repeating(self) -> impl Parser<'p, Vec<T>, E>
+    fn optional_repeating(self) -> impl Parser<'p, C, Vec<T>, E>
     where
         Self: Sized + 'p,
     {
@@ -113,7 +131,7 @@ pub trait Parser<'p, T: 'p, E: From<ParserError> + 'p>: private::SealedParser<T,
         })
     }
 
-    fn delimited<D>(self, delim: impl Parser<'p, D, E> + 'p) -> impl Parser<'p, Vec<T>, E>
+    fn delimited<D>(self, delim: impl Parser<'p, C, D, E> + 'p) -> impl Parser<'p, C, Vec<T>, E>
     where
         Self: Sized + 'p,
         D: 'p,
@@ -128,7 +146,10 @@ pub trait Parser<'p, T: 'p, E: From<ParserError> + 'p>: private::SealedParser<T,
         })
     }
 
-    fn optional_delimited<D>(self, delim: impl Parser<'p, D, E> + 'p) -> impl Parser<'p, Vec<T>, E>
+    fn optional_delimited<D>(
+        self,
+        delim: impl Parser<'p, C, D, E> + 'p,
+    ) -> impl Parser<'p, C, Vec<T>, E>
     where
         Self: Sized + 'p,
         D: 'p,
@@ -148,14 +169,14 @@ pub trait Parser<'p, T: 'p, E: From<ParserError> + 'p>: private::SealedParser<T,
         })
     }
 
-    fn ignore(self) -> impl Parser<'p, (), E>
+    fn ignore(self) -> impl Parser<'p, C, (), E>
     where
         Self: Sized + 'p,
     {
         self.map(|_| ())
     }
 
-    fn span(self) -> impl Parser<'p, &'p str, E>
+    fn span(self) -> impl Parser<'p, C, &'p str, E>
     where
         Self: Sized + 'p,
     {
@@ -166,7 +187,7 @@ pub trait Parser<'p, T: 'p, E: From<ParserError> + 'p>: private::SealedParser<T,
         })
     }
 
-    fn unilateral(self) -> impl Parser<'p, T, E>
+    fn unilateral(self) -> impl Parser<'p, C, T, E>
     where
         Self: Sized + 'p,
     {
@@ -181,9 +202,10 @@ pub trait Parser<'p, T: 'p, E: From<ParserError> + 'p>: private::SealedParser<T,
     }
 }
 
-pub fn literal<'p, E>(s: &'static str) -> impl Parser<'p, (), E>
+pub fn literal<'p, C, E>(s: &'static str) -> impl Parser<'p, C, (), E>
 where
-    E: From<ParserError> + 'static,
+    C: 'p,
+    E: From<ParserError> + 'p,
 {
     parser(move |ctx| {
         if ctx.slice().starts_with(s) {
@@ -195,12 +217,13 @@ where
     })
 }
 
-pub fn char_filter<'p, E>(
+pub fn char_filter<'p, C, E>(
     f: impl Fn(&char) -> bool + 'static,
     token_name: &'static str,
-) -> impl Parser<'p, char, E>
+) -> impl Parser<'p, C, char, E>
 where
-    E: From<ParserError> + 'static,
+    E: From<ParserError> + 'p,
+    C: 'p,
 {
     parser(move |ctx| {
         let next = ctx.slice().chars().next();
@@ -214,13 +237,13 @@ where
     })
 }
 
-impl<'a, F, T, E> Parser<'a, T, E> for ParserImpl<'a, F, T, E>
+impl<'p, F, C, T, E> Parser<'p, C, T, E> for ParserImpl<'p, F, C, T, E>
 where
-    F: Fn(&'a ParserContext<'a>) -> Result<T, E>,
-    T: 'a,
-    E: From<ParserError> + 'a,
+    F: Fn(&'p ParserContext<'p, C>) -> Result<T, E>,
+    T: 'p,
+    E: From<ParserError> + 'p,
 {
-    fn parse(&self, ctx: &'a ParserContext<'a>) -> Result<T, E> {
+    fn parse(&self, ctx: &'p ParserContext<'p, C>) -> Result<T, E> {
         (self.0)(ctx)
     }
 }

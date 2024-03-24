@@ -36,6 +36,7 @@ fn is_unit(typ: &Type) -> bool {
 struct CodegenState {
     parser_context_name: Ident,
     error_type: Type,
+    data_type: Type,
     parser_name: String,
     parser_types: HashMap<String, Type>,
 }
@@ -46,20 +47,20 @@ fn parse_fragment(
     capture: bool,
 ) -> Result<TokenStream> {
     let parser_name = &state.parser_name;
+    let data = &state.data_type;
+    let err = &state.error_type;
     let stream = match fragment {
         PatternFragment::Literal(lit) => {
-            let err = &state.error_type;
             quote! {
-                untwine::literal::<#err>(#lit)
+                untwine::literal::<#data, #err>(#lit)
             }
         }
         PatternFragment::CharRange(range) => {
             let inverted = range.inverted.then(|| quote! {!});
             let range_min = range.range.start();
             let range_max = range.range.end();
-            let err = &state.error_type;
             quote! {
-                untwine::char_filter::<#err>(|c| #inverted (#range_min ..= #range_max).contains(c), #parser_name)
+                untwine::char_filter::<#data, #err>(|c| #inverted (#range_min ..= #range_max).contains(c), #parser_name)
             }
         }
         PatternFragment::CharGroup(group) => {
@@ -69,22 +70,19 @@ fn parse_fragment(
                 quote! {}
             };
             let chars: String = group.chars.iter().collect();
-            let err = &state.error_type;
             quote! {
-                untwine::char_filter::<#err>(|c| #inverted #chars.contains(*c), #parser_name)
+                untwine::char_filter::<#data, #err>(|c| #inverted #chars.contains(*c), #parser_name)
             }
         }
         PatternFragment::CharFilter(filter) => {
             let filter = &filter.expr;
-            let err = &state.error_type;
             quote! {
-                untwine::char_filter::<#err>(#filter, #parser_name)
+                untwine::char_filter::<#data, #err>(#filter, #parser_name)
             }
         }
         PatternFragment::ParserRef(parser) => {
-            let err = &state.error_type;
             quote! {
-                untwine::parser::<_, #err>(|ctx| #parser(ctx))
+                untwine::parser::<#data, _, #err>(|ctx| #parser(ctx))
             }
         }
         PatternFragment::Ignore(pattern) => {
@@ -99,8 +97,7 @@ fn parse_fragment(
         }
         PatternFragment::Nested(list) => parse_pattern_list(list, state, capture)?,
         PatternFragment::AnyChar => {
-            let err = &state.error_type;
-            quote! {untwine::char_filter::<#err>(|_| true, "any character")}
+            quote! {untwine::char_filter::<#data, #err>(|_| true, "any character")}
         }
     };
     Ok(stream)
@@ -195,8 +192,9 @@ fn parse_patterns(
         }
     }
     let err = &state.error_type;
+    let data = &state.data_type;
     Ok(quote! {
-        untwine::parser::<_, #err>(|ctx| {
+        untwine::parser::<#data, _, #err>(|ctx| {
             #(
                 #parsers
             )*
@@ -211,6 +209,7 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
     let ctx = &state.parser_context_name;
     let typ = &parser.return_type;
     let err = &state.error_type;
+    let data = &state.data_type;
 
     let mut parsers = vec![];
 
@@ -232,7 +231,7 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
         quote! {#block}
     };
     Ok(quote! {
-        #vis fn #name<'p>(#ctx: &'p untwine::ParserContext<'p>) -> Result<#typ, #err> {
+        #vis fn #name<'p>(#ctx: &'p untwine::ParserContext<'p, #data>) -> Result<#typ, #err> {
             #(
                 #parsers
             )*
@@ -263,6 +262,7 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
     let mut state = CodegenState {
         parser_context_name: block.header.ctx_name,
         error_type: block.header.error_type,
+        data_type: block.header.data_type,
         parser_name: Default::default(),
         parser_types,
     };
