@@ -69,9 +69,9 @@ fn parse_fragment(
             } else {
                 quote! {}
             };
-            let chars: String = group.chars.iter().collect();
+            let chars: Vec<char> = group.chars.iter().cloned().collect();
             quote! {
-                untwine::char_filter::<#data, #err>(|c| #inverted #chars.contains(*c), #parser_name)
+                untwine::char_filter::<#data, #err>(|c| #inverted matches!(c, #(#chars)|*), #parser_name)
             }
         }
         PatternFragment::CharFilter(filter) => {
@@ -154,6 +154,7 @@ fn parse_pattern_choices(
     state: &CodegenState,
     capture: bool,
 ) -> Result<TokenStream> {
+    let name = &state.parser_name;
     let first = parse_patterns(&patterns[0], state, capture)?;
     let mut rest = vec![];
     for parser in patterns[1..].iter() {
@@ -161,7 +162,7 @@ fn parse_pattern_choices(
     }
 
     Ok(quote! {
-        #first #( .or(#rest) )*
+        #first #( .or(#rest, #name) )*
     })
 }
 

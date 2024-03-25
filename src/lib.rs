@@ -1,5 +1,6 @@
 use std::{
-    cell::{Cell, RefCell},
+    cell::{Cell, RefCell, UnsafeCell},
+    cmp::Ordering,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
@@ -16,18 +17,47 @@ pub enum ParserError {
     ExpectedToken(&'static str),
 }
 
+struct WriteCell<T> {
+    inner: UnsafeCell<T>,
+}
+
+impl<T> WriteCell<T> {
+    fn new(inner: T) -> Self {
+        WriteCell {
+            inner: UnsafeCell::new(inner),
+        }
+    }
+
+    fn write(&self, val: T) {
+        unsafe { *self.inner.get() = val }
+    }
+
+    fn read(&self) -> T
+    where
+        T: Clone,
+    {
+        unsafe { (*self.inner.get()).clone() }
+    }
+
+    fn into_inner(self) -> T {
+        self.inner.into_inner()
+    }
+}
+
 pub struct ParserContext<'p, C = ()> {
     cur: Cell<usize>,
-    input: &'p str,
+    last_reset: Cell<usize>,
     data: RefCell<C>,
+    input: &'p str,
 }
 
 impl<'p, C> ParserContext<'p, C> {
     pub fn new(input: &'p str, data: C) -> Self {
         ParserContext {
             cur: Default::default(),
-            input,
+            last_reset: Default::default(),
             data: RefCell::new(data),
+            input,
         }
     }
 
@@ -37,6 +67,12 @@ impl<'p, C> ParserContext<'p, C> {
 
     pub fn advance(&self, bytes: usize) {
         self.cur.set(self.input.len().min(self.cur.get() + bytes));
+    }
+
+    pub fn reset(&self, bytes: usize) {
+        self.last_reset
+            .set(self.last_reset.get().max(self.cur.get()));
+        self.cur.set(bytes);
     }
 
     pub fn data(&self) -> impl Deref<Target = C> + '_ {
@@ -97,11 +133,30 @@ pub trait Parser<'p, C: 'p, T: 'p, E: From<ParserError> + 'p>:
         parser(move |ctx| Ok(self.parse(ctx).ok()))
     }
 
-    fn or(self, other: impl Parser<'p, C, T, E> + 'p + Sized) -> impl Parser<'p, C, T, E>
+    fn or(
+        self,
+        other: impl Parser<'p, C, T, E> + 'p + Sized,
+        token_name: &'static str,
+    ) -> impl Parser<'p, C, T, E>
     where
         Self: Sized + 'p,
     {
-        parser(move |ctx| self.parse(ctx).or_else(|_| other.parse(ctx)))
+        parser(move |ctx| {
+            let first = self.parse(ctx);
+            if let Ok(parsed) = first {
+                return Ok(parsed);
+            }
+            let max = ctx.last_reset.get();
+            let second = other.parse(ctx);
+            if let Ok(parsed) = second {
+                return Ok(parsed);
+            }
+            match max.cmp(&ctx.last_reset.get()) {
+                Ordering::Greater => first,
+                Ordering::Less => second,
+                Ordering::Equal => Err(ParserError::ExpectedToken(token_name).into()),
+            }
+        })
     }
 
     fn repeating(self) -> impl Parser<'p, C, Vec<T>, E>
@@ -190,12 +245,13 @@ pub trait Parser<'p, C: 'p, T: 'p, E: From<ParserError> + 'p>:
     fn unilateral(self) -> impl Parser<'p, C, T, E>
     where
         Self: Sized + 'p,
+        E: std::fmt::Debug,
     {
         parser(move |ctx| {
             let start = ctx.cur.get();
             let res = self.parse(ctx);
-            if res.is_err() {
-                ctx.cur.set(start);
+            if let Err(_) = res {
+                ctx.reset(start);
             }
             res
         })
