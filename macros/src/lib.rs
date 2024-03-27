@@ -205,8 +205,17 @@ impl Parse for PatternFragment {
         } else if input.peek(Token![.]) {
             input.parse::<Token![.]>()?;
             Ok(PatternFragment::AnyChar)
-        } else if input.peek(Token![#]) && input.peek2(Bracket) && input.peek3(Ident) {
-            Ok(PatternFragment::Annotated(input.parse()?))
+        } else if input.peek(Token![#]) && input.peek2(Bracket) {
+            let fork = input.fork();
+            fork.parse::<Token![#]>()?;
+            let content;
+            bracketed!(content in fork);
+
+            if content.peek(Ident) {
+                Ok(PatternFragment::Annotated(input.parse()?))
+            } else {
+                Ok(PatternFragment::Ignore(Box::new(input.parse()?)))
+            }
         } else if input.peek(Token![#]) {
             let ignored: IgnoredPattern = input.parse()?;
             Ok(PatternFragment::Ignore(Box::new(ignored)))
@@ -304,6 +313,12 @@ impl Parse for CharGroup {
         bracketed!(content in input);
         let inverted: Option<Token![^]> = content.parse()?;
         let str: LitStr = content.parse()?;
+        if str.value().is_empty() {
+            return Err(syn::Error::new_spanned(
+                str,
+                "Character groups must have at least one character",
+            ));
+        }
         Ok(CharGroup {
             inverted: inverted.is_some(),
             chars: str.value().chars().collect(),
