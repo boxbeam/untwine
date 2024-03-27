@@ -30,7 +30,7 @@ pub fn vec_of(typ: &Type) -> Type {
 }
 
 fn is_unit(typ: &Type) -> bool {
-    matches!(typ, Type::Tuple(tup) if tup.elems.len() == 0)
+    matches!(typ, Type::Tuple(tup) if tup.elems.is_empty())
 }
 
 struct CodegenState {
@@ -69,7 +69,7 @@ fn parse_fragment(
             } else {
                 quote! {}
             };
-            let chars: Vec<char> = group.chars.iter().cloned().collect();
+            let chars = &group.chars;
             quote! {
                 untwine::char_filter::<#data, #err>(|c| #inverted matches!(c, #(#chars)|*), #parser_name)
             }
@@ -98,6 +98,16 @@ fn parse_fragment(
         PatternFragment::Nested(list) => parse_pattern_list(list, state, capture)?,
         PatternFragment::AnyChar => {
             quote! {untwine::char_filter::<#data, #err>(|_| true, "any character")}
+        }
+        PatternFragment::Annotated(attr) => {
+            let path = &attr.name;
+            let args = &attr.args;
+            let pattern_string = attr.pattern.to_string();
+            let parser_name = &state.parser_name;
+            let pattern = parse_pattern(&attr.pattern, state, capture)?;
+            quote! {
+                #path(#pattern, untwine::ParserMeta { parser_name: #parser_name, pattern_string: #pattern_string }, #(#args),*)
+            }
         }
     };
     Ok(stream)
@@ -150,7 +160,7 @@ fn parse_pattern_list(
 }
 
 fn parse_pattern_choices(
-    patterns: &Vec<Vec<Pattern>>,
+    patterns: &[Vec<Pattern>],
     state: &CodegenState,
     capture: bool,
 ) -> Result<TokenStream> {
@@ -167,7 +177,7 @@ fn parse_pattern_choices(
 }
 
 fn parse_patterns(
-    patterns: &Vec<Pattern>,
+    patterns: &[Pattern],
     state: &CodegenState,
     capture: bool,
 ) -> Result<TokenStream> {
@@ -233,7 +243,7 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
         quote! {#block}
     };
     Ok(quote! {
-        #vis fn #name<'p>(#ctx: &'p untwine::ParserContext<'p, #data>) -> Result<#typ, #err> {
+        #vis fn #name<'p>(#ctx: &'p untwine::ParserContext<'p, #data, #err>) -> Result<#typ, #err> {
             #(
                 #parsers
             )*
@@ -286,7 +296,7 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
     Ok(quote! {
         mod #parser_name {
             use super::*;
-            use untwine::{parser, Parser, literal, char_filter};
+            use untwine::{Parser, dbg};
 
             #(
                 #parsers
@@ -317,13 +327,14 @@ fn fragment_type(fragment: &PatternFragment, parser_types: &HashMap<String, Type
             };
             return Ok(typ.clone());
         }
-        P::Nested(PatternList::List(l)) => return Ok(list_type(l, parser_types)?),
-        P::Nested(PatternList::Choices(c)) => return Ok(list_type(&c[0], parser_types)?),
+        P::Nested(PatternList::List(l)) => return list_type(l, parser_types),
+        P::Nested(PatternList::Choices(c)) => return list_type(&c[0], parser_types),
+        P::Annotated(attr) => return pattern_type(&attr.pattern, parser_types),
     };
-    Ok(syn::parse(tokens.into())?)
+    syn::parse(tokens.into())
 }
 
-fn list_type(patterns: &Vec<Pattern>, parser_types: &HashMap<String, Type>) -> Result<Type> {
+fn list_type(patterns: &[Pattern], parser_types: &HashMap<String, Type>) -> Result<Type> {
     let mut tuple = vec![];
     for pattern in patterns {
         let typ = pattern_type(pattern, parser_types)?;
@@ -337,7 +348,7 @@ fn list_type(patterns: &Vec<Pattern>, parser_types: &HashMap<String, Type>) -> R
             #(#tuple),*
         )
     };
-    Ok(syn::parse(tokens.into())?)
+    syn::parse(tokens.into())
 }
 
 pub fn pattern_type(pattern: &Pattern, parser_types: &HashMap<String, Type>) -> Result<Type> {

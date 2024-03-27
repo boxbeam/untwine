@@ -8,10 +8,11 @@ use syn::{
     parse::{discouraged::Speculative, Parse, ParseStream},
     parse_macro_input,
     token::{Brace, Bracket, Paren},
-    Block, Expr, Ident, LitChar, LitStr, Result, Token, Type, Visibility,
+    Block, Expr, Ident, LitChar, LitStr, Path, Result, Token, Type, Visibility,
 };
 
 mod codegen;
+mod display;
 
 mod kw {
     use syn::custom_keyword;
@@ -183,6 +184,7 @@ pub(crate) enum PatternFragment {
     Ignore(Box<IgnoredPattern>),
     Span(PatternList),
     Nested(PatternList),
+    Annotated(PatternAttribute),
     AnyChar,
 }
 
@@ -203,6 +205,8 @@ impl Parse for PatternFragment {
         } else if input.peek(Token![.]) {
             input.parse::<Token![.]>()?;
             Ok(PatternFragment::AnyChar)
+        } else if input.peek(Token![#]) && input.peek2(Bracket) && input.peek3(Ident) {
+            Ok(PatternFragment::Annotated(input.parse()?))
         } else if input.peek(Token![#]) {
             let ignored: IgnoredPattern = input.parse()?;
             Ok(PatternFragment::Ignore(Box::new(ignored)))
@@ -230,6 +234,41 @@ impl Parse for Pattern {
         Ok(Pattern {
             fragment: input.parse()?,
             modifier: optional(input),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PatternAttribute {
+    name: Path,
+    args: Vec<Expr>,
+    pattern: Box<Pattern>,
+}
+
+impl Parse for PatternAttribute {
+    fn parse(input: ParseStream) -> Result<Self> {
+        input.parse::<Token![#]>()?;
+        let brackets;
+        bracketed!(brackets in input);
+        let name = brackets.parse()?;
+        let mut args = vec![];
+        if brackets.peek(Paren) {
+            let parens;
+            parenthesized!(parens in brackets);
+            while !parens.is_empty() {
+                args.push(parens.parse()?);
+                if !parens.is_empty() {
+                    parens.parse::<Token![,]>()?;
+                }
+            }
+        }
+
+        let pattern = Box::new(input.parse()?);
+
+        Ok(PatternAttribute {
+            name,
+            args,
+            pattern,
         })
     }
 }

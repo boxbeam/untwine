@@ -1,12 +1,12 @@
 use std::{
     cell::{Cell, RefCell, UnsafeCell},
     cmp::Ordering,
+    fmt::Debug,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
 
 pub mod any_stack;
-pub mod delimited_list;
 pub use macros::parser;
 
 #[derive(Debug, thiserror::Error)]
@@ -15,6 +15,33 @@ pub enum ParserError {
     ExpectedLiteral(&'static str),
     #[error("Expected {0}")]
     ExpectedToken(&'static str),
+}
+
+pub struct ParserMeta {
+    pub parser_name: &'static str,
+    pub pattern_string: &'static str,
+}
+
+pub fn dbg<'p, C, T, E>(
+    parser: impl Parser<'p, C, T, E> + 'p,
+    meta: ParserMeta,
+) -> impl Parser<'p, C, T, E>
+where
+    E: Debug + From<ParserError> + 'p,
+    C: 'p,
+    T: Debug + 'p,
+{
+    let name = meta.parser_name;
+    let pattern = meta.pattern_string;
+    crate::parser(move |ctx| {
+        let res = parser.parse(ctx);
+        println!(
+            "[{name}:{line}:{col}] {pattern} = {res:#?}",
+            line = ctx.line(),
+            col = ctx.col()
+        );
+        res
+    })
 }
 
 struct WriteCell<T> {
@@ -28,8 +55,8 @@ impl<T> WriteCell<T> {
         }
     }
 
-    fn write(&self, val: T) {
-        unsafe { *self.inner.get() = val }
+    fn write(&self, val: T) -> T {
+        unsafe { std::mem::replace(&mut *self.inner.get(), val) }
     }
 
     fn read(&self) -> T
@@ -44,18 +71,20 @@ impl<T> WriteCell<T> {
     }
 }
 
-pub struct ParserContext<'p, C = ()> {
+pub struct ParserContext<'p, C, E> {
     cur: Cell<usize>,
     last_reset: Cell<usize>,
+    deepest_error: WriteCell<Option<E>>,
     data: RefCell<C>,
     input: &'p str,
 }
 
-impl<'p, C> ParserContext<'p, C> {
+impl<'p, C, E> ParserContext<'p, C, E> {
     pub fn new(input: &'p str, data: C) -> Self {
         ParserContext {
             cur: Default::default(),
             last_reset: Default::default(),
+            deepest_error: WriteCell::new(None),
             data: RefCell::new(data),
             input,
         }
@@ -63,6 +92,18 @@ impl<'p, C> ParserContext<'p, C> {
 
     pub fn slice(&self) -> &str {
         &self.input[self.cur.get()..]
+    }
+
+    pub fn line(&self) -> usize {
+        self.input[..self.cur.get()].lines().count()
+    }
+
+    pub fn col(&self) -> usize {
+        self.input[..self.cur.get()]
+            .chars()
+            .rev()
+            .take_while(|c| *c != '\n')
+            .count()
     }
 
     pub fn advance(&self, bytes: usize) {
@@ -86,12 +127,12 @@ impl<'p, C> ParserContext<'p, C> {
 
 struct ParserImpl<'p, F, C, T, E>(F, PhantomData<&'p (C, T, E)>)
 where
-    F: Fn(&'p ParserContext<'p, C>) -> Result<T, E> + 'p,
+    F: Fn(&'p ParserContext<'p, C, E>) -> Result<T, E> + 'p,
     T: 'p,
     E: From<ParserError> + 'p;
 
 pub fn parser<'p, C, T, E>(
-    f: impl Fn(&'p ParserContext<'p, C>) -> Result<T, E> + 'p,
+    f: impl Fn(&'p ParserContext<'p, C, E>) -> Result<T, E> + 'p,
 ) -> impl Parser<'p, C, T, E> + 'p
 where
     C: 'p,
@@ -117,7 +158,7 @@ where
 pub trait Parser<'p, C: 'p, T: 'p, E: From<ParserError> + 'p>:
     private::SealedParser<C, T, E>
 {
-    fn parse(&self, ctx: &'p ParserContext<'p, C>) -> Result<T, E>;
+    fn parse(&self, ctx: &'p ParserContext<'p, C, E>) -> Result<T, E>;
 
     fn map<V: 'p>(self, f: impl Fn(T) -> V + 'p) -> impl Parser<'p, C, V, E> + 'p
     where
@@ -194,7 +235,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: From<ParserError> + 'p>:
         parser(move |ctx| {
             let mut elems = vec![];
             elems.push(self.parse(ctx)?);
-            while let Ok(_) = delim.parse(ctx) {
+            while delim.parse(ctx).is_ok() {
                 elems.push(self.parse(ctx)?);
             }
             Ok(elems)
@@ -217,7 +258,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: From<ParserError> + 'p>:
             };
             elems.push(elem);
 
-            while let Ok(_) = delim.parse(ctx) {
+            while delim.parse(ctx).is_ok() {
                 elems.push(self.parse(ctx)?);
             }
             Ok(elems)
@@ -250,7 +291,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: From<ParserError> + 'p>:
         parser(move |ctx| {
             let start = ctx.cur.get();
             let res = self.parse(ctx);
-            if let Err(_) = res {
+            if res.is_err() {
                 ctx.reset(start);
             }
             res
@@ -295,11 +336,11 @@ where
 
 impl<'p, F, C, T, E> Parser<'p, C, T, E> for ParserImpl<'p, F, C, T, E>
 where
-    F: Fn(&'p ParserContext<'p, C>) -> Result<T, E>,
+    F: Fn(&'p ParserContext<'p, C, E>) -> Result<T, E>,
     T: 'p,
     E: From<ParserError> + 'p,
 {
-    fn parse(&self, ctx: &'p ParserContext<'p, C>) -> Result<T, E> {
+    fn parse(&self, ctx: &'p ParserContext<'p, C, E>) -> Result<T, E> {
         (self.0)(ctx)
     }
 }

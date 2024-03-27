@@ -1,5 +1,5 @@
 [workspace]
-members = ["demo", "macros"] 
+members = ["macros"] 
 
 [workspace.dependencies]
 thiserror = {version = "1.0.58"}
