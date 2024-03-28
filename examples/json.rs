@@ -63,7 +63,7 @@ fn main() {
         let Some(output) = json(&ctx) else {
             let pos = (ctx.line(), ctx.col());
             println!("{pos:?} {:?}", ctx.into_err());
-            return;
+            continue;
         };
         println!("---\n{output:#?}\n---");
     }

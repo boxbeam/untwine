@@ -107,7 +107,7 @@ impl<'p, C, E> ParserContext<'p, C, E> {
     where
         E: From<E2>,
     {
-        if self.cur.get() >= self.max_error_pos.get() {
+        if self.cur.get() > self.max_error_pos.get() {
             self.deepest_error.write(Some(err.into()));
             self.max_error_pos.set(self.cur.get());
         }
@@ -302,12 +302,19 @@ where
     E: From<ParserError> + 'p,
 {
     parser(move |ctx| {
-        if ctx.slice().starts_with(s) {
-            ctx.advance(s.len());
-            Some(())
-        } else {
-            return ctx.err(ParserError::ExpectedLiteral(s).into());
+        let matched = s
+            .chars()
+            .zip(ctx.slice().chars())
+            .take_while(|(a, b)| a == b)
+            .count();
+        ctx.advance(matched);
+        if matched == s.len() {
+            return Some(());
+        } else if matched > 0 {
+            ctx.err::<(), _>(ParserError::ExpectedLiteral(s).into());
+            ctx.reset(ctx.cur.get() - matched);
         }
+        None
     })
 }
 
