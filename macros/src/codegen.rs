@@ -296,7 +296,7 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
     Ok(quote! {
         mod #parser_name {
             use super::*;
-            use untwine::{Parser, dbg};
+            use untwine::{Parser, attr::*};
 
             #(
                 #parsers

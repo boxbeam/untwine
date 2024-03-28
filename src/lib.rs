@@ -1,6 +1,5 @@
 use std::{
     cell::{Cell, RefCell, UnsafeCell},
-    fmt::Debug,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
@@ -11,32 +10,11 @@ pub mod error;
 use error::AsParserError;
 pub use error::ParserError;
 pub use macros::parser;
+pub mod attr;
 
 pub struct ParserMeta {
     pub parser_name: &'static str,
     pub pattern_string: &'static str,
-}
-
-pub fn dbg<'p, C, T, E>(
-    parser: impl Parser<'p, C, T, E> + 'p,
-    meta: ParserMeta,
-) -> impl Parser<'p, C, T, E>
-where
-    E: Debug + AsParserError + 'p,
-    C: 'p,
-    T: Debug + 'p,
-{
-    let name = meta.parser_name;
-    let pattern = meta.pattern_string;
-    crate::parser(move |ctx| {
-        let res = parser.parse(ctx);
-        println!(
-            "[{name}:{line}:{col}] {pattern} = {res:#?}",
-            line = ctx.line(),
-            col = ctx.col()
-        );
-        res
-    })
 }
 
 struct WriteCell<T> {
@@ -87,7 +65,7 @@ impl<'p, C, E> ParserContext<'p, C, E> {
     }
 
     pub fn line(&self) -> usize {
-        self.input[..self.cur.get()].lines().count()
+        self.input[..self.cur.get()].lines().count().max(1)
     }
 
     pub fn col(&self) -> usize {
@@ -107,9 +85,9 @@ impl<'p, C, E> ParserContext<'p, C, E> {
         if err.as_parser_err().is_none() {
             max -= 1;
         }
-        if self.cur.get() > max {
+        if self.cur.get() + 1 > max {
             self.deepest_error.write(Some(err));
-            self.max_error_pos.set(self.cur.get());
+            self.max_error_pos.set(self.cur.get() + 1);
         }
         None
     }
@@ -265,6 +243,20 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
         Self: Sized + 'p,
     {
         self.map(|_| ())
+    }
+
+    fn ignore_err(self) -> impl Parser<'p, C, T, E>
+    where
+        Self: Sized + 'p,
+    {
+        parser(move |ctx| {
+            let prev = ctx.deepest_error.write(None);
+            let max = ctx.max_error_pos.get();
+            let res = self.parse(ctx);
+            ctx.deepest_error.write(prev);
+            ctx.max_error_pos.set(max);
+            res
+        })
     }
 
     fn span(self) -> impl Parser<'p, C, &'p str, E>

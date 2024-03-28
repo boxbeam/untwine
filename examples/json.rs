@@ -46,7 +46,7 @@ impl AsParserError for ParseJSONError {
 
 parser! {
     [error = ParseJSONError]
-    sep = #{char::is_ascii_whitespace}*;
+    sep = #[ignore_err] #{char::is_ascii_whitespace}*;
     comma = sep? "," sep?;
     int: num=<"-"? '0'-'9'+> -> JSONValue { JSONValue::Int(num.parse()?) }
     float: num=<"-"? '0'-'9'+ "." '0'-'9'+> -> JSONValue { JSONValue::Float(num.parse()?) }
