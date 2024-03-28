@@ -3,7 +3,7 @@ use std::{
     num::{ParseFloatError, ParseIntError},
 };
 
-use untwine::{parser, ParserContext};
+use untwine::{error::AsParserError, parser, ParserContext};
 
 #[derive(Debug)]
 pub enum JSONValue {
@@ -33,6 +33,15 @@ enum ParseJSONError {
     ParseInt(#[from] ParseIntError),
     #[error("Failed to parse number: {0}")]
     ParseFloat(#[from] ParseFloatError),
+}
+
+impl AsParserError for ParseJSONError {
+    fn as_parser_err(&self) -> Option<&untwine::ParserError> {
+        match self {
+            Self::Untwine(err) => Some(err),
+            _ => None,
+        }
+    }
 }
 
 parser! {

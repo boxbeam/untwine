@@ -7,15 +7,10 @@ use std::{
 
 pub mod any_stack;
 mod circular_queue;
+pub mod error;
+use error::AsParserError;
+pub use error::ParserError;
 pub use macros::parser;
-
-#[derive(Debug, thiserror::Error)]
-pub enum ParserError {
-    #[error("Expected literal '{0}'")]
-    ExpectedLiteral(&'static str),
-    #[error("Expected {0}")]
-    ExpectedToken(&'static str),
-}
 
 pub struct ParserMeta {
     pub parser_name: &'static str,
@@ -27,7 +22,7 @@ pub fn dbg<'p, C, T, E>(
     meta: ParserMeta,
 ) -> impl Parser<'p, C, T, E>
 where
-    E: Debug + From<ParserError> + 'p,
+    E: Debug + AsParserError + 'p,
     C: 'p,
     T: Debug + 'p,
 {
@@ -105,10 +100,15 @@ impl<'p, C, E> ParserContext<'p, C, E> {
 
     pub fn err<T, E2>(&self, err: E2) -> Option<T>
     where
-        E: From<E2>,
+        E: From<E2> + AsParserError,
     {
-        if self.cur.get() > self.max_error_pos.get() {
-            self.deepest_error.write(Some(err.into()));
+        let err: E = err.into();
+        let mut max = self.max_error_pos.get();
+        if err.as_parser_err().is_none() {
+            max -= 1;
+        }
+        if self.cur.get() > max {
+            self.deepest_error.write(Some(err));
             self.max_error_pos.set(self.cur.get());
         }
         None
@@ -135,7 +135,7 @@ struct ParserImpl<'p, F, C, T, E>(F, PhantomData<&'p (C, T, E)>)
 where
     F: Fn(&'p ParserContext<'p, C, E>) -> Option<T> + 'p,
     T: 'p,
-    E: From<ParserError> + 'p;
+    E: AsParserError + 'p;
 
 pub fn parser<'p, C, T, E>(
     f: impl Fn(&'p ParserContext<'p, C, E>) -> Option<T> + 'p,
@@ -143,7 +143,7 @@ pub fn parser<'p, C, T, E>(
 where
     C: 'p,
     T: 'p,
-    E: From<ParserError> + 'p,
+    E: AsParserError + 'p,
 {
     ParserImpl(f, PhantomData)
 }
@@ -155,15 +155,13 @@ mod private {
 impl<'p, C, T, E, P> private::SealedParser<C, T, E> for P
 where
     C: 'p,
-    E: From<ParserError> + 'p,
+    E: AsParserError + 'p,
     P: Parser<'p, C, T, E>,
     T: 'p,
 {
 }
 
-pub trait Parser<'p, C: 'p, T: 'p, E: From<ParserError> + 'p>:
-    private::SealedParser<C, T, E>
-{
+pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser<C, T, E> {
     fn parse(&self, ctx: &'p ParserContext<'p, C, E>) -> Option<T>;
 
     fn map<V: 'p>(self, f: impl Fn(T) -> V + 'p) -> impl Parser<'p, C, V, E> + 'p
@@ -299,7 +297,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: From<ParserError> + 'p>:
 pub fn literal<'p, C, E>(s: &'static str) -> impl Parser<'p, C, (), E>
 where
     C: 'p,
-    E: From<ParserError> + 'p,
+    E: AsParserError + 'p,
 {
     parser(move |ctx| {
         let matched = s
@@ -323,7 +321,7 @@ pub fn char_filter<'p, C, E>(
     token_name: &'static str,
 ) -> impl Parser<'p, C, char, E>
 where
-    E: From<ParserError> + 'p,
+    E: AsParserError + 'p,
     C: 'p,
 {
     parser(move |ctx| {
@@ -342,7 +340,7 @@ impl<'p, F, C, T, E> Parser<'p, C, T, E> for ParserImpl<'p, F, C, T, E>
 where
     F: Fn(&'p ParserContext<'p, C, E>) -> Option<T>,
     T: 'p,
-    E: From<ParserError> + 'p,
+    E: AsParserError + 'p,
 {
     fn parse(&self, ctx: &'p ParserContext<'p, C, E>) -> Option<T> {
         (self.0)(ctx)
