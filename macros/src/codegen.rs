@@ -164,12 +164,12 @@ fn parse_pattern_choices(
     state: &CodegenState,
     capture: bool,
 ) -> Result<TokenStream> {
-    let name = &state.parser_name;
     let first = parse_patterns(&patterns[0], state, capture)?;
     let mut rest = vec![];
     for parser in patterns[1..].iter() {
         rest.push(parse_patterns(parser, state, capture)?);
     }
+    let name = &state.parser_name;
 
     Ok(quote! {
         #first #( .or(#rest, #name) )*
@@ -210,7 +210,7 @@ fn parse_patterns(
             #(
                 #parsers
             )*
-            Ok(( #(#captured),* ))
+            Some(( #(#captured),* ))
         }).unilateral()
     })
 }
@@ -243,12 +243,12 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
         quote! {#block}
     };
     Ok(quote! {
-        #vis fn #name<'p>(#ctx: &'p untwine::ParserContext<'p, #data, #err>) -> Result<#typ, #err> {
+        #vis fn #name<'p>(#ctx: &'p untwine::ParserContext<'p, #data, #err>) -> Option<#typ> {
             #(
                 #parsers
             )*
 
-            Ok(#block)
+            (move || -> Result<#typ, #err> {Ok(#block)})().map_err(|e| #ctx.err::<#typ, _>(e)).ok()
         }
     })
 }

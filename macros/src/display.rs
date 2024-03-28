@@ -66,7 +66,7 @@ impl ToString for PatternFragment {
             PatternFragment::ParserRef(ident) => ident.to_string(),
             PatternFragment::Ignore(ignored) => format!("#{}", ignored.pattern.to_string()),
             PatternFragment::Span(span) => format!("<{}>", span.to_string()),
-            PatternFragment::Nested(nested) => nested.to_string(),
+            PatternFragment::Nested(nested) => format!("({})", nested.to_string()),
             PatternFragment::Annotated(annotated) => annotated.pattern.to_string(),
             PatternFragment::AnyChar => ".".to_string(),
         }
