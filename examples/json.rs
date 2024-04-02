@@ -46,7 +46,7 @@ impl AsParserError for ParseJSONError {
 
 parser! {
     [error = ParseJSONError]
-    sep = #[ignore_err] #{char::is_ascii_whitespace}*;
+    sep = #{char::is_ascii_whitespace}*;
     comma = sep? "," sep?;
     int: num=<"-"? '0'-'9'+> -> JSONValue { JSONValue::Int(num.parse()?) }
     float: num=<"-"? '0'-'9'+ "." '0'-'9'+> -> JSONValue { JSONValue::Float(num.parse()?) }
@@ -60,20 +60,25 @@ parser! {
     pub json = (bool | null | str | float | int | list | map) -> JSONValue;
 }
 
+// parser! {
+//     bool: bool=<"true" | "false"> -> JSONValue { JSONValue::Bool(bool == "true") }
+//     super_bool: bool "." bool -> JSONValue { JSONValue::Null }
+//     sep = #{char::is_ascii_whitespace}*;
+//     comma = sep "," sep;
+//     list: "[" sep elems=json$comma* sep #[dbg] "]" -> JSONValue { JSONValue::List(elems) }
+//     pub json = (list | super_bool | bool) -> JSONValue;
+// }
+
 parser! {
-    num: digits=<{char::is_ascii_digit}+> -> i32 { digits.parse().unwrap() }
-    pub num_list = #[dbg] num$","+ -> Vec<i32>;
+    num: digits=<'0'-'9'+> -> i32 { digits.parse().unwrap() }
+    pub num_list = num$","+ -> Vec<i32>;
 }
 
 fn main() {
     for line in std::io::stdin().lines() {
         let line = line.unwrap();
         let ctx = ParserContext::new(&line, ());
-        let Some(output) = json(&ctx) else {
-            let pos = (ctx.line(), ctx.col());
-            println!("{pos:?} {:?}", ctx.into_err());
-            continue;
-        };
+        let output = json(&ctx);
         println!("---\n{output:#?}\n---");
     }
 }

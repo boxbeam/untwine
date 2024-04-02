@@ -164,15 +164,33 @@ fn parse_pattern_choices(
     state: &CodegenState,
     capture: bool,
 ) -> Result<TokenStream> {
-    let first = parse_patterns(&patterns[0], state, capture)?;
-    let mut rest = vec![];
-    for parser in patterns[1..].iter() {
-        rest.push(parse_patterns(parser, state, capture)?);
+    let data = &state.data_type;
+    let err = &state.error_type;
+    let ctx = &state.parser_context_name;
+
+    let mut parsers = vec![];
+
+    for parser in patterns {
+        let parser = parse_patterns(parser, state, capture)?;
+
+        parsers.push(quote! {
+            {
+                let res = #parser.parse(#ctx);
+                match res.success {
+                    Some(val) => return ParserResult::new(Some(val), untwine::InternalError::max_optional(__err, res.error)),
+                    None => __err = untwine::InternalError::max_optional(res.error, __err),
+                }
+            }
+        });
     }
-    let name = &state.parser_name;
 
     Ok(quote! {
-        #first #( .or(#rest, #name) )*
+        untwine::parser::<#data, _, #err>(|#ctx| {
+            let mut __err = None;
+
+            #(#parsers)*
+            ParserResult::new(None, __err)
+        })
     })
 }
 
@@ -193,7 +211,16 @@ fn parse_patterns(
         let ctx = &state.parser_context_name;
 
         let parser = quote! {
-            let #ident = #parser.parse(#ctx)?;
+            let #ident = {
+                let res = #parser.parse(#ctx);
+                match res.success {
+                    Some(val) => {
+                        __err = res.error;
+                        val
+                    },
+                    None => return ParserResult::new(None, untwine::InternalError::max_optional(__err, res.error)),
+                }
+            };
         };
         parsers.push(parser);
 
@@ -207,10 +234,11 @@ fn parse_patterns(
     let ctx = &state.parser_context_name;
     Ok(quote! {
         untwine::parser::<#data, _, #err>(|#ctx| {
+            let mut __err = None;
             #(
                 #parsers
             )*
-            Some(( #(#captured),* ))
+            ParserResult::new(Some(( #(#captured),* )), __err)
         }).unilateral()
     })
 }
@@ -232,7 +260,21 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
             .map(|ident| quote! {let #ident =})
             .unwrap_or_default();
         let parser = parse_pattern(&pattern.pattern, state, pattern.label.is_some())?;
-        parsers.push(quote! {#prefix #parser.parse(#ctx)?;});
+        parsers.push(quote! {
+            #prefix {
+                let res = #parser.parse(#ctx);
+                match res.success {
+                    Some(val) => {
+                        __err = untwine::InternalError::max_optional(__err, res.error);
+                        val
+                    },
+                    None => {
+                        #ctx.reset(__start);
+                        return ParserResult::new(None, untwine::InternalError::max_optional(__err, res.error))
+                    },
+                }
+            };
+        });
     }
 
     let block = &parser.block;
@@ -243,12 +285,17 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
         quote! {#block}
     };
     Ok(quote! {
-        #vis fn #name<'p>(#ctx: &'p untwine::ParserContext<'p, #data, #err>) -> Option<#typ> {
+        #vis fn #name<'p>(#ctx: &'p untwine::ParserContext<'p, #data>) -> ParserResult<#typ, #err> {
+            let mut __err = None;
+            let __start = #ctx.cursor();
             #(
                 #parsers
             )*
 
-            (move || -> Result<#typ, #err> {Ok(#block)})().map_err(|e| #ctx.err::<#typ, _>(e)).ok()
+            match (move || -> Result<#typ, #err> { Ok(#block) })() {
+                Ok(val) => ParserResult::new(Some(val), __err),
+                Err(err) => ParserResult::new(None, Some(#ctx.internal_error(err))),
+            }
         }
     })
 }
@@ -296,7 +343,7 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
     Ok(quote! {
         mod #parser_name {
             use super::*;
-            use untwine::{Parser, attr::*};
+            use untwine::{Parser, ParserResult, attr::*};
 
             #(
                 #parsers

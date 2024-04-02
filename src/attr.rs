@@ -17,7 +17,7 @@ where
         println!(
             "[{name}:{line}:{col}] {pattern} = {res:#?}",
             line = ctx.line(),
-            col = ctx.col()
+            col = ctx.col(),
         );
         res
     })

@@ -1,5 +1,6 @@
 use std::{
-    cell::{Cell, RefCell, UnsafeCell},
+    cell::{Cell, RefCell},
+    fmt::Debug,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
@@ -17,47 +18,70 @@ pub struct ParserMeta {
     pub pattern_string: &'static str,
 }
 
-struct WriteCell<T> {
-    inner: UnsafeCell<T>,
+#[derive(Debug)]
+pub struct ParserResult<T, E> {
+    pub success: Option<T>,
+    pub error: Option<InternalError<E>>,
 }
 
-impl<T> WriteCell<T> {
-    fn new(inner: T) -> Self {
-        WriteCell {
-            inner: UnsafeCell::new(inner),
+impl<T, E> ParserResult<T, E> {
+    fn map<V>(self, f: impl FnOnce(T) -> V) -> ParserResult<V, E> {
+        ParserResult {
+            success: self.success.map(f),
+            error: self.error,
         }
     }
 
-    fn write(&self, val: T) -> T {
-        unsafe { std::mem::replace(&mut *self.inner.get(), val) }
+    pub fn new(success: Option<T>, error: Option<InternalError<E>>) -> Self {
+        ParserResult { success, error }
     }
 
-    fn into_inner(self) -> T {
-        self.inner.into_inner()
+    pub fn success(result: T) -> Self {
+        ParserResult {
+            success: Some(result),
+            error: None,
+        }
     }
 }
 
-pub struct ParserContext<'p, C, E> {
+#[derive(Debug)]
+pub struct InternalError<E> {
+    pos: usize,
+    err: E,
+}
+
+impl<E> InternalError<E> {
+    pub fn max(self, other: Self) -> Self {
+        if self.pos > other.pos {
+            self
+        } else {
+            other
+        }
+    }
+
+    pub fn max_optional(first: Option<Self>, second: Option<Self>) -> Option<Self> {
+        match (first, second) {
+            (None, None) => None,
+            (None, Some(b)) => Some(b),
+            (Some(a), None) => Some(a),
+            (Some(a), Some(b)) => Some(a.max(b)),
+        }
+    }
+}
+
+pub struct ParserContext<'p, C> {
     cur: Cell<usize>,
-    max_error_pos: Cell<usize>,
-    deepest_error: WriteCell<Option<E>>,
     data: RefCell<C>,
     input: &'p str,
 }
 
-impl<'p, C, E> ParserContext<'p, C, E> {
+impl<'p, C> ParserContext<'p, C> {
     pub fn new(input: &'p str, data: C) -> Self {
         ParserContext {
             cur: Default::default(),
-            max_error_pos: Default::default(),
-            deepest_error: WriteCell::new(None),
             data: RefCell::new(data),
             input,
         }
-    }
-
-    pub fn into_err(self) -> Option<E> {
-        self.deepest_error.into_inner()
     }
 
     pub fn slice(&self) -> &str {
@@ -76,20 +100,11 @@ impl<'p, C, E> ParserContext<'p, C, E> {
             .count()
     }
 
-    pub fn err<T, E2>(&self, err: E2) -> Option<T>
-    where
-        E: From<E2> + AsParserError,
-    {
-        let err: E = err.into();
-        let mut max = self.max_error_pos.get();
-        if err.as_parser_err().is_none() {
-            max -= 1;
+    pub fn internal_error<E>(&self, err: E) -> InternalError<E> {
+        InternalError {
+            pos: self.cur.get(),
+            err: err.into(),
         }
-        if self.cur.get() + 1 > max {
-            self.deepest_error.write(Some(err));
-            self.max_error_pos.set(self.cur.get() + 1);
-        }
-        None
     }
 
     pub fn advance(&self, bytes: usize) {
@@ -98,6 +113,10 @@ impl<'p, C, E> ParserContext<'p, C, E> {
 
     pub fn reset(&self, bytes: usize) {
         self.cur.set(bytes);
+    }
+
+    pub fn cursor(&self) -> usize {
+        self.cur.get()
     }
 
     pub fn data(&self) -> impl Deref<Target = C> + '_ {
@@ -111,12 +130,12 @@ impl<'p, C, E> ParserContext<'p, C, E> {
 
 struct ParserImpl<'p, F, C, T, E>(F, PhantomData<&'p (C, T, E)>)
 where
-    F: Fn(&'p ParserContext<'p, C, E>) -> Option<T> + 'p,
+    F: Fn(&'p ParserContext<'p, C>) -> ParserResult<T, E> + 'p,
     T: 'p,
     E: AsParserError + 'p;
 
 pub fn parser<'p, C, T, E>(
-    f: impl Fn(&'p ParserContext<'p, C, E>) -> Option<T> + 'p,
+    f: impl Fn(&'p ParserContext<'p, C>) -> ParserResult<T, E> + 'p,
 ) -> impl Parser<'p, C, T, E> + 'p
 where
     C: 'p,
@@ -140,7 +159,7 @@ where
 }
 
 pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser<C, T, E> {
-    fn parse(&self, ctx: &'p ParserContext<'p, C, E>) -> Option<T>;
+    fn parse(&self, ctx: &'p ParserContext<'p, C>) -> ParserResult<T, E>;
 
     fn map<V: 'p>(self, f: impl Fn(T) -> V + 'p) -> impl Parser<'p, C, V, E> + 'p
     where
@@ -153,23 +172,24 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
     where
         Self: Sized + 'p,
     {
-        parser(move |ctx| Some(self.parse(ctx)))
+        parser(move |ctx| {
+            let res = self.parse(ctx);
+            ParserResult::new(Some(res.success), res.error)
+        })
     }
 
-    fn or(
-        self,
-        other: impl Parser<'p, C, T, E> + 'p + Sized,
-        name: &'static str,
-    ) -> impl Parser<'p, C, T, E>
+    fn or(self, other: impl Parser<'p, C, T, E> + 'p + Sized) -> impl Parser<'p, C, T, E>
     where
         Self: Sized + 'p,
     {
         parser(move |ctx| {
-            let res = self.parse(ctx).or_else(|| other.parse(ctx));
-            if res.is_none() {
-                ctx.err::<T, _>(ParserError::ExpectedToken(name));
+            let res = self.parse(ctx);
+            if res.success.is_some() {
+                return res;
             }
-            res
+            let mut other = other.parse(ctx);
+            other.error = InternalError::max_optional(other.error, res.error);
+            other
         })
     }
 
@@ -179,11 +199,22 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
     {
         parser(move |ctx| {
             let mut elems = vec![];
-            elems.push(self.parse(ctx)?);
-            while let Some(elem) = self.parse(ctx) {
+            let res = self.parse(ctx);
+            let Some(elem) = res.success else {
+                return ParserResult::new(None, res.error);
+            };
+            elems.push(elem);
+            let err;
+
+            loop {
+                let res = self.parse(ctx);
+                let Some(elem) = res.success else {
+                    err = res.error;
+                    break;
+                };
                 elems.push(elem);
             }
-            Some(elems)
+            ParserResult::new(Some(elems), err)
         })
     }
 
@@ -193,10 +224,16 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
     {
         parser(move |ctx| {
             let mut elems = vec![];
-            while let Some(elem) = self.parse(ctx) {
+            let mut err;
+            loop {
+                let res = self.parse(ctx);
+                err = res.error;
+                let Some(elem) = res.success else {
+                    break;
+                };
                 elems.push(elem);
             }
-            Some(elems)
+            ParserResult::new(Some(elems), err)
         })
     }
 
@@ -207,11 +244,23 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
     {
         parser(move |ctx| {
             let mut elems = vec![];
-            elems.push(self.parse(ctx)?);
-            while delim.parse(ctx).is_some() {
-                elems.push(self.parse(ctx)?);
+            let res = self.parse(ctx);
+
+            let Some(elem) = res.success else {
+                return ParserResult::new(Some(elems), res.error);
+            };
+            elems.push(elem);
+
+            let mut err = res.error;
+            while delim.parse(ctx).success.is_some() {
+                let res = self.parse(ctx);
+                let Some(elem) = res.success else {
+                    return ParserResult::new(None, InternalError::max_optional(err, res.error));
+                };
+                err = res.error;
+                elems.push(elem);
             }
-            Some(elems)
+            ParserResult::new(Some(elems), err)
         })
     }
 
@@ -226,15 +275,22 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
         parser(move |ctx| {
             let mut elems = vec![];
 
-            let Some(elem) = self.parse(ctx) else {
-                return Some(elems);
+            let res = self.parse(ctx);
+            let Some(elem) = res.success else {
+                return ParserResult::new(Some(elems), res.error);
             };
             elems.push(elem);
 
-            while delim.parse(ctx).is_some() {
-                elems.push(self.parse(ctx)?);
+            let mut err = res.error;
+            while delim.parse(ctx).success.is_some() {
+                let res = self.parse(ctx);
+                let Some(elem) = res.success else {
+                    return ParserResult::new(None, InternalError::max_optional(err, res.error));
+                };
+                err = res.error;
+                elems.push(elem);
             }
-            Some(elems)
+            ParserResult::new(Some(elems), err)
         })
     }
 
@@ -250,11 +306,8 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
         Self: Sized + 'p,
     {
         parser(move |ctx| {
-            let prev = ctx.deepest_error.write(None);
-            let max = ctx.max_error_pos.get();
-            let res = self.parse(ctx);
-            ctx.deepest_error.write(prev);
-            ctx.max_error_pos.set(max);
+            let mut res = self.parse(ctx);
+            res.error = None;
             res
         })
     }
@@ -265,8 +318,8 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
     {
         parser(move |ctx| {
             let start = ctx.cur.get();
-            self.parse(ctx)?;
-            Some(&ctx.input[start..ctx.cur.get()])
+            let res = self.parse(ctx);
+            res.map(|_| &ctx.input[start..ctx.cur.get()])
         })
     }
 
@@ -278,7 +331,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
         parser(move |ctx| {
             let start = ctx.cur.get();
             let res = self.parse(ctx);
-            if res.is_none() {
+            if res.success.is_none() {
                 ctx.reset(start);
             }
             res
@@ -299,12 +352,11 @@ where
             .count();
         ctx.advance(matched);
         if matched == s.len() {
-            return Some(());
-        } else if matched > 0 {
-            ctx.err::<(), _>(ParserError::ExpectedLiteral(s).into());
-            ctx.reset(ctx.cur.get() - matched);
+            return ParserResult::success(());
         }
-        None
+        let err = ctx.internal_error(ParserError::ExpectedLiteral(s).into());
+        ctx.reset(ctx.cur.get() - matched);
+        ParserResult::new(None, Some(err))
     })
 }
 
@@ -321,20 +373,21 @@ where
         if let Some(next) = next {
             if f(&next) {
                 ctx.advance(next.len_utf8());
-                return Some(next);
+                return ParserResult::success(next);
             }
         };
-        ctx.err(ParserError::ExpectedToken(token_name).into())
+        let error = ctx.internal_error(ParserError::ExpectedToken(token_name).into());
+        ParserResult::new(None, Some(error))
     })
 }
 
 impl<'p, F, C, T, E> Parser<'p, C, T, E> for ParserImpl<'p, F, C, T, E>
 where
-    F: Fn(&'p ParserContext<'p, C, E>) -> Option<T>,
+    F: Fn(&'p ParserContext<'p, C>) -> ParserResult<T, E>,
     T: 'p,
     E: AsParserError + 'p,
 {
-    fn parse(&self, ctx: &'p ParserContext<'p, C, E>) -> Option<T> {
+    fn parse(&self, ctx: &'p ParserContext<'p, C>) -> ParserResult<T, E> {
         (self.0)(ctx)
     }
 }
