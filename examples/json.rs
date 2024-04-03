@@ -47,7 +47,7 @@ impl AsParserError for ParseJSONError {
 parser! {
     [error = ParseJSONError]
     sep = #{char::is_ascii_whitespace}*;
-    comma = sep? "," sep?;
+    comma = sep "," sep;
     int: num=<"-"? '0'-'9'+> -> JSONValue { JSONValue::Int(num.parse()?) }
     float: num=<"-"? '0'-'9'+ "." '0'-'9'+> -> JSONValue { JSONValue::Float(num.parse()?) }
     str_char = ("\\" . | [^"\""]) -> char;
@@ -55,7 +55,7 @@ parser! {
     null: "null" -> JSONValue { JSONValue::Null }
     bool: bool=<"true" | "false"> -> JSONValue { JSONValue::Bool(bool == "true") }
     list: "[" sep values=json$comma* sep "]" -> JSONValue { JSONValue::List(values) }
-    map_entry: key=str sep? ":" sep? value=json -> (String, JSONValue) { (key.string().unwrap(), value) }
+    map_entry: key=str sep ":" sep value=json -> (String, JSONValue) { (key.string().unwrap(), value) }
     map: "{" sep values=map_entry$comma* sep "}" -> JSONValue { JSONValue::Map(values.into_iter().collect()) }
     pub json = (bool | null | str | float | int | list | map) -> JSONValue;
 }

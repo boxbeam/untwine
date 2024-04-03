@@ -21,50 +21,41 @@ pub struct ParserMeta {
 #[derive(Debug)]
 pub struct ParserResult<T, E> {
     pub success: Option<T>,
-    pub error: Option<InternalError<E>>,
+    pub error: Option<E>,
+    /// The deepest position encountered when parsing, including failed branches
+    pub pos: usize,
 }
 
 impl<T, E> ParserResult<T, E> {
-    fn map<V>(self, f: impl FnOnce(T) -> V) -> ParserResult<V, E> {
+    pub fn map<V>(self, f: impl FnOnce(T) -> V) -> ParserResult<V, E> {
         ParserResult {
             success: self.success.map(f),
             error: self.error,
+            pos: self.pos,
         }
     }
 
-    pub fn new(success: Option<T>, error: Option<InternalError<E>>) -> Self {
-        ParserResult { success, error }
+    pub fn new(success: Option<T>, error: Option<E>, pos: usize) -> Self {
+        ParserResult {
+            success,
+            error,
+            pos,
+        }
     }
 
-    pub fn success(result: T) -> Self {
+    pub fn integrate_error<V>(mut self, other: ParserResult<V, E>) -> Self {
+        if other.pos > self.pos && other.error.is_some() {
+            self.error = other.error;
+            self.pos = other.pos;
+        }
+        self
+    }
+
+    pub fn success(result: T, pos: usize) -> Self {
         ParserResult {
             success: Some(result),
             error: None,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct InternalError<E> {
-    pos: usize,
-    err: E,
-}
-
-impl<E> InternalError<E> {
-    pub fn max(self, other: Self) -> Self {
-        if self.pos > other.pos {
-            self
-        } else {
-            other
-        }
-    }
-
-    pub fn max_optional(first: Option<Self>, second: Option<Self>) -> Option<Self> {
-        match (first, second) {
-            (None, None) => None,
-            (None, Some(b)) => Some(b),
-            (Some(a), None) => Some(a),
-            (Some(a), Some(b)) => Some(a.max(b)),
+            pos,
         }
     }
 }
@@ -100,11 +91,8 @@ impl<'p, C> ParserContext<'p, C> {
             .count()
     }
 
-    pub fn internal_error<E>(&self, err: E) -> InternalError<E> {
-        InternalError {
-            pos: self.cur.get(),
-            err: err.into(),
-        }
+    pub fn result<T, E>(&self, success: Option<T>, error: Option<E>) -> ParserResult<T, E> {
+        ParserResult::new(success, error, self.cursor())
     }
 
     pub fn advance(&self, bytes: usize) {
@@ -174,7 +162,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
     {
         parser(move |ctx| {
             let res = self.parse(ctx);
-            ParserResult::new(Some(res.success), res.error)
+            ParserResult::new(Some(res.success), res.error, res.pos)
         })
     }
 
@@ -187,9 +175,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
             if res.success.is_some() {
                 return res;
             }
-            let mut other = other.parse(ctx);
-            other.error = InternalError::max_optional(other.error, res.error);
-            other
+            other.parse(ctx).integrate_error(res)
         })
     }
 
@@ -201,20 +187,18 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
             let mut elems = vec![];
             let res = self.parse(ctx);
             let Some(elem) = res.success else {
-                return ParserResult::new(None, res.error);
+                return ParserResult::new(None, res.error, res.pos);
             };
             elems.push(elem);
-            let err;
 
-            loop {
+            let failed = loop {
                 let res = self.parse(ctx);
                 let Some(elem) = res.success else {
-                    err = res.error;
-                    break;
+                    break res;
                 };
                 elems.push(elem);
-            }
-            ParserResult::new(Some(elems), err)
+            };
+            ParserResult::new(Some(elems), failed.error, failed.pos)
         })
     }
 
@@ -224,16 +208,14 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
     {
         parser(move |ctx| {
             let mut elems = vec![];
-            let mut err;
-            loop {
+            let failed = loop {
                 let res = self.parse(ctx);
-                err = res.error;
                 let Some(elem) = res.success else {
-                    break;
+                    break res;
                 };
                 elems.push(elem);
-            }
-            ParserResult::new(Some(elems), err)
+            };
+            ParserResult::new(Some(elems), failed.error, failed.pos)
         })
     }
 
@@ -244,23 +226,23 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
     {
         parser(move |ctx| {
             let mut elems = vec![];
-            let res = self.parse(ctx);
+            let mut res = self.parse(ctx);
 
-            let Some(elem) = res.success else {
-                return ParserResult::new(Some(elems), res.error);
+            let Some(elem) = res.success.take() else {
+                return ParserResult::new(Some(elems), res.error, res.pos);
             };
             elems.push(elem);
 
-            let mut err = res.error;
+            let mut last_res = res;
             while delim.parse(ctx).success.is_some() {
-                let res = self.parse(ctx);
-                let Some(elem) = res.success else {
-                    return ParserResult::new(None, InternalError::max_optional(err, res.error));
+                let mut res = self.parse(ctx);
+                let Some(elem) = res.success.take() else {
+                    return ParserResult::new(None, res.error, res.pos).integrate_error(last_res);
                 };
-                err = res.error;
+                last_res = res;
                 elems.push(elem);
             }
-            ParserResult::new(Some(elems), err)
+            ParserResult::new(Some(elems), last_res.error, last_res.pos)
         })
     }
 
@@ -275,22 +257,22 @@ pub trait Parser<'p, C: 'p, T: 'p, E: AsParserError + 'p>: private::SealedParser
         parser(move |ctx| {
             let mut elems = vec![];
 
-            let res = self.parse(ctx);
-            let Some(elem) = res.success else {
-                return ParserResult::new(Some(elems), res.error);
+            let mut res = self.parse(ctx);
+            let Some(elem) = res.success.take() else {
+                return ParserResult::new(Some(elems), res.error, res.pos);
             };
             elems.push(elem);
 
-            let mut err = res.error;
+            let mut last_res = res;
             while delim.parse(ctx).success.is_some() {
-                let res = self.parse(ctx);
-                let Some(elem) = res.success else {
-                    return ParserResult::new(None, InternalError::max_optional(err, res.error));
+                let mut res = self.parse(ctx);
+                let Some(elem) = res.success.take() else {
+                    return ParserResult::new(None, res.error, res.pos).integrate_error(last_res);
                 };
-                err = res.error;
+                last_res = res;
                 elems.push(elem);
             }
-            ParserResult::new(Some(elems), err)
+            ParserResult::new(Some(elems), last_res.error, last_res.pos)
         })
     }
 
@@ -352,11 +334,12 @@ where
             .count();
         ctx.advance(matched);
         if matched == s.len() {
-            return ParserResult::success(());
+            return ctx.result(Some(()), None);
         }
-        let err = ctx.internal_error(ParserError::ExpectedLiteral(s).into());
+        let err = ParserError::ExpectedLiteral(s).into();
+        let res = ctx.result(None, Some(err));
         ctx.reset(ctx.cur.get() - matched);
-        ParserResult::new(None, Some(err))
+        res
     })
 }
 
@@ -373,11 +356,11 @@ where
         if let Some(next) = next {
             if f(&next) {
                 ctx.advance(next.len_utf8());
-                return ParserResult::success(next);
+                return ctx.result(Some(next), None);
             }
         };
-        let error = ctx.internal_error(ParserError::ExpectedToken(token_name).into());
-        ParserResult::new(None, Some(error))
+        let error = ParserError::ExpectedToken(token_name).into();
+        ctx.result(None, Some(error))
     })
 }
 

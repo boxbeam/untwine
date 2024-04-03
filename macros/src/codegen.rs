@@ -167,6 +167,7 @@ fn parse_pattern_choices(
     let data = &state.data_type;
     let err = &state.error_type;
     let ctx = &state.parser_context_name;
+    let name = &state.parser_name;
 
     let mut parsers = vec![];
 
@@ -177,8 +178,12 @@ fn parse_pattern_choices(
             {
                 let res = #parser.parse(#ctx);
                 match res.success {
-                    Some(val) => return ParserResult::new(Some(val), untwine::InternalError::max_optional(__err, res.error)),
-                    None => __err = untwine::InternalError::max_optional(res.error, __err),
+                    Some(val) => return ParserResult::new(Some(val), res.error, res.pos).integrate_error(__res),
+                    None => {
+                        if res.pos > __res.pos {
+                            __res = res.map(drop);
+                        }
+                    },
                 }
             }
         });
@@ -186,10 +191,14 @@ fn parse_pattern_choices(
 
     Ok(quote! {
         untwine::parser::<#data, _, #err>(|#ctx| {
-            let mut __err = None;
+            let mut __res: ParserResult<(), _> = #ctx.result(None, None);
+            let start = #ctx.cursor();
 
             #(#parsers)*
-            ParserResult::new(None, __err)
+            if start == __res.pos {
+                return ParserResult::new(None, Some(untwine::ParserError::ExpectedToken(#name).into()), start)
+            }
+            ParserResult::new(None, __res.error, __res.pos)
         })
     })
 }
@@ -212,13 +221,13 @@ fn parse_patterns(
 
         let parser = quote! {
             let #ident = {
-                let res = #parser.parse(#ctx);
-                match res.success {
+                let mut res = #parser.parse(#ctx);
+                match res.success.take() {
                     Some(val) => {
-                        __err = res.error;
+                        __res = __res.integrate_error(res);
                         val
                     },
-                    None => return ParserResult::new(None, untwine::InternalError::max_optional(__err, res.error)),
+                    None => return ParserResult::new(None, res.error, res.pos).integrate_error(__res),
                 }
             };
         };
@@ -234,11 +243,11 @@ fn parse_patterns(
     let ctx = &state.parser_context_name;
     Ok(quote! {
         untwine::parser::<#data, _, #err>(|#ctx| {
-            let mut __err = None;
+            let mut __res: ParserResult<(), _> = #ctx.result(None, None);
             #(
                 #parsers
             )*
-            ParserResult::new(Some(( #(#captured),* )), __err)
+            ParserResult::new(Some(( #(#captured),* )), __res.error, __res.pos)
         }).unilateral()
     })
 }
@@ -262,15 +271,15 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
         let parser = parse_pattern(&pattern.pattern, state, pattern.label.is_some())?;
         parsers.push(quote! {
             #prefix {
-                let res = #parser.parse(#ctx);
-                match res.success {
+                let mut res = #parser.parse(#ctx);
+                match res.success.take() {
                     Some(val) => {
-                        __err = untwine::InternalError::max_optional(__err, res.error);
+                        __res = __res.integrate_error(res);
                         val
                     },
                     None => {
                         #ctx.reset(__start);
-                        return ParserResult::new(None, untwine::InternalError::max_optional(__err, res.error))
+                        return ParserResult::new(None, res.error, res.pos).integrate_error(__res);
                     },
                 }
             };
@@ -286,15 +295,16 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
     };
     Ok(quote! {
         #vis fn #name<'p>(#ctx: &'p untwine::ParserContext<'p, #data>) -> ParserResult<#typ, #err> {
-            let mut __err = None;
+            let mut __res: ParserResult<(), _> = #ctx.result(None, None);
             let __start = #ctx.cursor();
             #(
                 #parsers
             )*
 
-            match (move || -> Result<#typ, #err> { Ok(#block) })() {
-                Ok(val) => ParserResult::new(Some(val), __err),
-                Err(err) => ParserResult::new(None, Some(#ctx.internal_error(err))),
+            let res = (move || -> Result<#typ, #err> { Ok(#block) })();
+            match res {
+                Ok(val) => #ctx.result(Some(val), None).integrate_error(__res),
+                Err(err) => ParserResult::new(None, Some(err), __res.pos),
             }
         }
     })
