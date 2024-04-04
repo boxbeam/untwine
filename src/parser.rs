@@ -2,9 +2,13 @@ use std::marker::PhantomData;
 
 use crate::{context::ParserContext, result::ParserResult};
 
+/// The fundamental parsing construct for untwine. A simple parser which comes with combinators
+/// for modifying its behavior.
 pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
+    /// Parse a value from the [ParserContext]. On fail, the context will be reset to the starting position.
     fn parse(&self, ctx: &'p ParserContext<'p, C>) -> ParserResult<T, E>;
 
+    /// Map the output value using a mapping function.
     fn map<V: 'p>(self, f: impl Fn(T) -> V + 'p) -> impl Parser<'p, C, V, E> + 'p
     where
         Self: Sized + 'p,
@@ -12,6 +16,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         parser(move |ctx| self.parse(ctx).map(&f))
     }
 
+    /// Match this token optionally. This parsing operation will always succeed, returning [None] if the the child failed.
     fn optional(self) -> impl Parser<'p, C, Option<T>, E>
     where
         Self: Sized + 'p,
@@ -22,6 +27,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         })
     }
 
+    /// Try another parser if this one fails. This can mess up error reporting.
     fn or(self, other: impl Parser<'p, C, T, E> + 'p + Sized) -> impl Parser<'p, C, T, E>
     where
         Self: Sized + 'p,
@@ -35,6 +41,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         })
     }
 
+    /// Try to parse as many times as possible in sequence, requiring at least one match.
     fn repeating(self) -> impl Parser<'p, C, Vec<T>, E>
     where
         Self: Sized + 'p,
@@ -58,6 +65,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         })
     }
 
+    /// Try to parse as many times as possible in sequence, allowing zero matches.
     fn optional_repeating(self) -> impl Parser<'p, C, Vec<T>, E>
     where
         Self: Sized + 'p,
@@ -75,6 +83,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         })
     }
 
+    /// Parse a list using this parser, separated by another delimiter parser. Discards delimiters, and requires at least one match.
     fn delimited<D>(self, delim: impl Parser<'p, C, D, E> + 'p) -> impl Parser<'p, C, Vec<T>, E>
     where
         Self: Sized + 'p,
@@ -102,6 +111,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         })
     }
 
+    /// Parse a list using this parser, separated by another delimiter parser. Discards delimiters, and allows zero matches.
     fn optional_delimited<D>(
         self,
         delim: impl Parser<'p, C, D, E> + 'p,
@@ -132,13 +142,15 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         })
     }
 
+    /// Ignore the output of this parser by dropping it.
     fn ignore(self) -> impl Parser<'p, C, (), E>
     where
         Self: Sized + 'p,
     {
-        self.map(|_| ())
+        self.map(drop)
     }
 
+    /// Ignore the error output of this parser.
     fn ignore_err(self) -> impl Parser<'p, C, T, E>
     where
         Self: Sized + 'p,
@@ -150,6 +162,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         })
     }
 
+    /// Capture the span of the parsed value as a [&str] instead of the value of itself.
     fn span(self) -> impl Parser<'p, C, &'p str, E>
     where
         Self: Sized + 'p,
@@ -161,6 +174,8 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         })
     }
 
+    /// Used for parsers which do not uphold the invariant of resetting the parsing head on failure.
+    /// This will automatically reset the position if parsing fails.
     fn unilateral(self) -> impl Parser<'p, C, T, E>
     where
         Self: Sized + 'p,
@@ -177,12 +192,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     }
 }
 
-struct ParserImpl<'p, F, C, T, E>(F, PhantomData<&'p (C, T, E)>)
-where
-    F: Fn(&'p ParserContext<'p, C>) -> ParserResult<T, E> + 'p,
-    T: 'p,
-    E: 'p;
-
+/// Create a Parser from a lambda which takes in a &[ParserContext] and returns a [ParserResult].
 pub fn parser<'p, C, T, E>(
     f: impl Fn(&'p ParserContext<'p, C>) -> ParserResult<T, E> + 'p,
 ) -> impl Parser<'p, C, T, E> + 'p
@@ -193,6 +203,12 @@ where
 {
     ParserImpl(f, PhantomData)
 }
+
+struct ParserImpl<'p, F, C, T, E>(F, PhantomData<&'p (C, T, E)>)
+where
+    F: Fn(&'p ParserContext<'p, C>) -> ParserResult<T, E> + 'p,
+    T: 'p,
+    E: 'p;
 
 mod private {
     pub trait SealedParser<C, T, E> {}

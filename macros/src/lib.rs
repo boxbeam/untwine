@@ -465,6 +465,79 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 }
 
 #[proc_macro]
+/// Generate parsers using a series of declarative patterns and blocks evaluating their values.
+///
+/// Parsers, or "rules", are structured similarly to regular rust functions, and will be converted into
+/// them by this macro. Each rule consists of an optional visiblity modifier, a name, a series of patterns,
+/// and a block to evaluate the output of the parser.
+///
+/// ## Example of a simple parser
+/// ```
+/// parser! {
+///    num: digits=<'0'-'9'+> -> u32 { digits.parse().unwrap() }
+///    pub num_list: nums=num$","+ -> Vec<u32> { nums }
+/// }
+/// ```
+/// Here, `num` is defined as a parser which parses the pattern `<'0'-'9'+>`, whose output is captured to the
+/// variable `digits`, and it evaluates to a `u32` (the result is implicit, and the error type can be configured).
+/// It generates its output by calling `.parse().unwrap()` on `digits`, which is captured as a [&str].
+///
+/// ## Summary of pattern syntax
+/// - `"literal"` - Parses a string literal, and evaluates to `()` (since string literals are assumed to be structural and not desired in output).
+/// - `'a'-'z'` - Parses characters within a range, equivalent to `'a'..='z'` in regular Rust. Evaluates to [char].
+/// - `^'a'-'z'` - Similar to the above, but parses a character not contained in the range.
+/// - `["abcd"]` - Match any character contained within the string literal. Evaluates to [char].
+/// - `[^"abcd"]` - Similar to the above, but parses a character not contained in the group.
+/// - `.` - Match any single character. Evaluates to [char].
+/// - `{char::is_whitespace}` - Matches any character passing the predicate inside `{}`. Any function with the signature `fn(&char) -> bool` can be used, including a custom lambda.
+/// - `<inner pattern>` - Captures the span of the parsed value as a [&str], rather than the value itself.
+/// - `ident` - Uses a parser defined in this parser block by name.
+/// - `var=pattern` - Captures the output of a parser to a variable which can be used in the parser's function body.
+/// - `(pattern_a | pattern_b)` - Can chain as many patterns as desired together. The resulting parser will try parsing using each of them, in the order specified. Each pattern used must have the same type.
+/// - `pattern_a pattern_b` - Parse two patterns in sequence. The output type will be `(A, B)` for the corresponding types `A` and `B` for the patterns. Units will not be included in this output.
+/// - Modifiers
+///   - `pattern+` - Modifies a pattern to make it repeat as many times as possible, at least once. Returns a [Vec] of the modified pattern's type.
+///   - `pattern*` - Similar to the above, but allows zero matches.
+///   - `pattern?` - Parses the pattern optionally. Returns an [Option] of the modified pattern's type.
+///   - `pattern$delimiter+` - Parses a list of `pattern` delimited by `delimiter`, requiring at least one value. Returns a [Vec] of `pattern`'s output type. The delimiter's output is ignored.
+///   - `pattern$delimiter*` - Similar to the above, but allows zero matches.
+///   - `#pattern` - Ignores the output of the modified pattern, making it return `()`.
+///   - `#[dbg] pattern` - Print the debug output of the pattern after parsing.
+///   - `#[ident] pattern` - The above syntax is not a special case, `untwine::attr::dbg` is its implementation. Any similar function can be used as an attribute.
+///
+/// ## Special syntax for parsers
+/// There is an alternate syntax for parsers whose output needs no modification.
+/// The example parser `num_list` above could also be written like this:
+/// ```
+/// parser! {
+///    num: digits=<'0'-'9'+> -> u32 { digits.parse().unwrap() }
+///    pub num_list = nums=num$","+ -> Vec<u32>;
+/// }
+/// ```
+/// If the parser simply returns the output of all of its patterns unchanged, it may use an `=` instead of `:` and
+/// use a semicolon instead of a function body. If the output type is `()`, the `-> ReturnType` can also be omitted,
+/// allowing structural rules like whitespace to be defined simply, like `sep = {char::is_whitespace}*;`.
+///
+/// ## Configuring a parser block
+/// There are some values that can be adjusted to change the behavior of a parser.
+/// These arguments are specified inside `[]` prior to defining any parsers:
+/// ```
+/// parser! {
+///     [error = MyErrorType]
+///     ...
+/// }
+/// ```
+/// Here are the available options:
+/// - `error = MyErrorType` - Use `MyErrorType` instead of `ParserError` as the error type for all parsers. `MyErrorType` must implement `From<ParserError>`.
+/// - `context = ctx_name` - Expose the `ParserContext` to the parser function bodies using the name specified.
+/// - `data_type = MyCustomContext` - Specify a custom context type which will be passed to all parser functions. It can be accessed using `.data()` or `.data_mut()` on the context argument.
+///
+/// ## Using a parser
+/// Every parser specified is rewritten into a regular Rust function, which will parse all of the patterns specified and evaluate your block at the end.
+/// Those which have a visibility modifier like `pub` or `pub(crate)` will be accessible outside of the parser block.
+///
+/// To use one of these parsers, you can either construct a `ParserContext` and call it as normal, or use `untwine::parse` / `untwine::parse_pretty` to get
+/// a regular [Result] instead of untwine's `ParserResult` type.
 pub fn parser(input: TokenStream) -> TokenStream {
     let block: ParserBlock = parse_macro_input!(input as ParserBlock);
 

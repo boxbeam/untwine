@@ -1,14 +1,18 @@
 use crate::Parser;
 use std::fmt::Debug;
 
-pub struct ParserMeta {
+/// Static data provided to parser attributes.
+pub struct PatternMeta {
+    /// The name of the parser rule which the pattern is part of.
     pub parser_name: &'static str,
+    /// The pattern as a string.
     pub pattern_string: &'static str,
 }
 
+/// Debug prints the output of the parser and returns it unchanged.
 pub fn dbg<'p, C, T, E>(
     parser: impl Parser<'p, C, T, E> + 'p,
-    meta: ParserMeta,
+    meta: PatternMeta,
 ) -> impl Parser<'p, C, T, E>
 where
     E: Debug + 'p,
@@ -28,9 +32,10 @@ where
     })
 }
 
+/// Ignores the error output of the pattern.
 pub fn ignore_err<'p, C, T, E>(
     parser: impl Parser<'p, C, T, E> + 'p,
-    _meta: ParserMeta,
+    _meta: PatternMeta,
 ) -> impl Parser<'p, C, T, E>
 where
     E: Debug + 'p,
