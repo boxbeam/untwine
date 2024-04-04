@@ -1,7 +1,11 @@
 [package]
-name = "macros"
+name = "untwine_macros"
 version = "0.1.0"
 edition = "2021"
+description = "Declarative parsing with a BNF-like syntax - proc macro"
+authors = ["boxbeam"]
+keywords = ["parsing", "parser", "framework"]
+license = "MIT"
 
 [lib]
 proc-macro = true
