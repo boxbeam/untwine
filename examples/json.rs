@@ -61,11 +61,12 @@ fn main() {
     print!("> ");
     std::io::stdout().flush().unwrap();
     for line in std::io::stdin().lines() {
+        println!();
         match untwine::parse_pretty(json, &line.unwrap()) {
             Ok(val) => println!("{val:?}"),
             Err(err) => println!("{err}"),
         }
-        print!("> ");
+        print!("\n> ");
         std::io::stdout().flush().unwrap();
     }
 }

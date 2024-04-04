@@ -38,7 +38,7 @@ impl<'p, C> ParserContext<'p, C> {
 
     /// Create a [ParserResult] using the position of the parsing head.
     pub fn result<T, E>(&self, success: Option<T>, error: Option<E>) -> ParserResult<T, E> {
-        ParserResult::new(success, error, self.cursor())
+        ParserResult::new(success, error, self.cursor()..self.cursor())
     }
 
     /// Advance the parsing head by the given number of bytes.

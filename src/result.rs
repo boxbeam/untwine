@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, ops::Range};
 
 use crate::context::*;
 
@@ -10,7 +10,7 @@ pub struct ParserResult<T, E> {
     /// The deepest error encountered, even if parsing succeeded.
     pub error: Option<E>,
     /// The deepest position encountered when parsing, including failed branches.
-    pub pos: usize,
+    pub pos: Range<usize>,
 }
 
 impl<T, E> ParserResult<T, E> {
@@ -32,7 +32,7 @@ impl<T, E> ParserResult<T, E> {
         }
     }
 
-    pub fn new(success: Option<T>, error: Option<E>, pos: usize) -> Self {
+    pub fn new(success: Option<T>, error: Option<E>, pos: Range<usize>) -> Self {
         ParserResult {
             success,
             error,
@@ -42,7 +42,7 @@ impl<T, E> ParserResult<T, E> {
 
     /// Integrate the error of another [ParserResult], if its position is higher.
     pub fn integrate_error<V>(mut self, other: ParserResult<V, E>) -> Self {
-        if other.pos > self.pos {
+        if other.pos.end > self.pos.end {
             self.error = other.error;
             self.pos = other.pos;
         }
@@ -54,8 +54,15 @@ impl<T, E> ParserResult<T, E> {
         ParserResult {
             success: Some(result),
             error: None,
-            pos,
+            pos: pos..pos,
         }
+    }
+
+    pub fn set_start_if_empty(mut self, start: usize) -> Self {
+        if self.pos.is_empty() {
+            self.pos.start = start;
+        }
+        self
     }
 
     /// Generate a pretty error message visually pointing out the location of the error.
@@ -67,8 +74,8 @@ impl<T, E> ParserResult<T, E> {
             Some(e) => format!("{e}"),
             None => "Unexpected token or end of input".to_string(),
         };
-        let line = line(&ctx.input[..self.pos]);
-        let col = col(&ctx.input[..self.pos]);
+        let line = line(&ctx.input[..self.pos.end]);
+        let col = col(&ctx.input[..self.pos.end]);
         let error_line = ctx
             .input
             .lines()
@@ -77,11 +84,13 @@ impl<T, E> ParserResult<T, E> {
 
         let min = col.checked_sub(40).unwrap_or(0);
         let max = error_line.len().min(col + 40);
+        let selection_len = self.pos.len().min(col - min);
 
         let error_part = &error_line[min as usize..max as usize];
-        let padding = " ".repeat(col.checked_sub(min).unwrap_or(0));
+        let padding = " ".repeat(col.checked_sub(min + selection_len).unwrap_or(0))
+            + &"-".repeat(selection_len);
         let err = format!(
-            "{error_part}\n{padding}^\nError ({line}:{col}): {error}",
+            "{error_part}\n{padding}^\n[{line}:{col}]: {error}",
             line = line.max(1),
             col = col.max(1)
         );

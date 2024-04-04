@@ -180,7 +180,7 @@ fn parse_pattern_choices(
                 match res.success {
                     Some(val) => return ParserResult::new(Some(val), res.error, res.pos).integrate_error(__res),
                     None => {
-                        if res.pos > __res.pos {
+                        if res.pos.end > __res.pos.end {
                             __res = res.map(drop);
                         }
                     },
@@ -192,11 +192,11 @@ fn parse_pattern_choices(
     Ok(quote! {
         parser::<#data, _, #err>(|#ctx| {
             let mut __res: ParserResult<(), _> = #ctx.result(None, None);
-            let start = #ctx.cursor();
+            let __start = #ctx.cursor();
 
             #(#parsers)*
-            if start == __res.pos {
-                return ParserResult::new(None, Some(ParserError::ExpectedToken(#name).into()), start)
+            if __start == __res.pos.end {
+                return ParserResult::new(None, Some(ParserError::ExpectedToken(#name).into()), __start..__start)
             }
             ParserResult::new(None, __res.error, __res.pos)
         })
@@ -248,7 +248,7 @@ fn parse_patterns(
                 #parsers
             )*
             ParserResult::new(Some(( #(#captured),* )), __res.error, __res.pos)
-        }).unilateral()
+        })
     })
 }
 
@@ -279,7 +279,7 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
                     },
                     None => {
                         #ctx.reset(__start);
-                        return ParserResult::new(None, res.error, res.pos).integrate_error(__res);
+                        return ParserResult::new(None, res.error, res.pos).integrate_error(__res).set_start_if_empty(__start);
                     },
                 }
             };

@@ -1,4 +1,4 @@
-use crate::{parser, Parser, ParserError};
+use crate::{parser, Parser, ParserError, ParserResult};
 
 pub fn literal<'p, C, E>(s: &'static str) -> impl Parser<'p, C, (), E>
 where
@@ -16,7 +16,7 @@ where
             return ctx.result(Some(()), None);
         }
         let err = ParserError::ExpectedLiteral(s).into();
-        let res = ctx.result(None, Some(err));
+        let res = ParserResult::new(None, Some(err), ctx.cursor() - matched..ctx.cursor());
         ctx.reset(ctx.cursor() - matched);
         res
     })
