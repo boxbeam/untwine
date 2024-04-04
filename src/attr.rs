@@ -1,12 +1,17 @@
-use crate::{error::AsParserError, Parser, ParserMeta};
+use crate::Parser;
 use std::fmt::Debug;
+
+pub struct ParserMeta {
+    pub parser_name: &'static str,
+    pub pattern_string: &'static str,
+}
 
 pub fn dbg<'p, C, T, E>(
     parser: impl Parser<'p, C, T, E> + 'p,
     meta: ParserMeta,
 ) -> impl Parser<'p, C, T, E>
 where
-    E: Debug + AsParserError + 'p,
+    E: Debug + 'p,
     C: 'p,
     T: Debug + 'p,
 {
@@ -28,7 +33,7 @@ pub fn ignore_err<'p, C, T, E>(
     _meta: ParserMeta,
 ) -> impl Parser<'p, C, T, E>
 where
-    E: Debug + AsParserError + 'p,
+    E: Debug + 'p,
     C: 'p,
     T: 'p,
 {

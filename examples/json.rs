@@ -1,9 +1,10 @@
 use std::{
     collections::HashMap,
+    io::Write,
     num::{ParseFloatError, ParseIntError},
 };
 
-use untwine::{error::AsParserError, parser, ParserContext};
+use untwine::parser;
 
 #[derive(Debug)]
 pub enum JSONValue {
@@ -27,21 +28,12 @@ impl JSONValue {
 
 #[derive(Debug, thiserror::Error)]
 enum ParseJSONError {
-    #[error("Syntax error: {0:?}")]
+    #[error("Syntax error: {0}")]
     Untwine(#[from] untwine::ParserError),
     #[error("Failed to parse number: {0}")]
     ParseInt(#[from] ParseIntError),
     #[error("Failed to parse number: {0}")]
     ParseFloat(#[from] ParseFloatError),
-}
-
-impl AsParserError for ParseJSONError {
-    fn as_parser_err(&self) -> Option<&untwine::ParserError> {
-        match self {
-            Self::Untwine(err) => Some(err),
-            _ => None,
-        }
-    }
 }
 
 parser! {
@@ -60,25 +52,20 @@ parser! {
     pub json = (bool | null | str | float | int | list | map) -> JSONValue;
 }
 
-// parser! {
-//     bool: bool=<"true" | "false"> -> JSONValue { JSONValue::Bool(bool == "true") }
-//     super_bool: bool "." bool -> JSONValue { JSONValue::Null }
-//     sep = #{char::is_ascii_whitespace}*;
-//     comma = sep "," sep;
-//     list: "[" sep elems=json$comma* sep #[dbg] "]" -> JSONValue { JSONValue::List(elems) }
-//     pub json = (list | super_bool | bool) -> JSONValue;
-// }
-
 parser! {
     num: digits=<'0'-'9'+> -> i32 { digits.parse().unwrap() }
     pub num_list = num$","+ -> Vec<i32>;
 }
 
 fn main() {
+    print!("> ");
+    std::io::stdout().flush().unwrap();
     for line in std::io::stdin().lines() {
-        let line = line.unwrap();
-        let ctx = ParserContext::new(&line, ());
-        let output = json(&ctx);
-        println!("---\n{output:#?}\n---");
+        match untwine::parse_pretty(json, &line.unwrap()) {
+            Ok(val) => println!("{val:?}"),
+            Err(err) => println!("{err}"),
+        }
+        print!("> ");
+        std::io::stdout().flush().unwrap();
     }
 }

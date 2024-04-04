@@ -52,7 +52,7 @@ fn parse_fragment(
     let stream = match fragment {
         PatternFragment::Literal(lit) => {
             quote! {
-                untwine::literal::<#data, #err>(#lit)
+                literal::<#data, #err>(#lit)
             }
         }
         PatternFragment::CharRange(range) => {
@@ -60,7 +60,7 @@ fn parse_fragment(
             let range_min = range.range.start();
             let range_max = range.range.end();
             quote! {
-                untwine::char_filter::<#data, #err>(|c| #inverted (#range_min ..= #range_max).contains(c), #parser_name)
+                char_filter::<#data, #err>(|c| #inverted (#range_min ..= #range_max).contains(c), #parser_name)
             }
         }
         PatternFragment::CharGroup(group) => {
@@ -71,18 +71,18 @@ fn parse_fragment(
             };
             let chars = &group.chars;
             quote! {
-                untwine::char_filter::<#data, #err>(|c| #inverted matches!(c, #(#chars)|*), #parser_name)
+                char_filter::<#data, #err>(|c| #inverted matches!(c, #(#chars)|*), #parser_name)
             }
         }
         PatternFragment::CharFilter(filter) => {
             let filter = &filter.expr;
             quote! {
-                untwine::char_filter::<#data, #err>(#filter, #parser_name)
+                char_filter::<#data, #err>(#filter, #parser_name)
             }
         }
         PatternFragment::ParserRef(parser) => {
             quote! {
-                untwine::parser::<#data, _, #err>(|ctx| #parser(ctx))
+                parser::<#data, _, #err>(|ctx| #parser(ctx))
             }
         }
         PatternFragment::Ignore(pattern) => {
@@ -97,7 +97,7 @@ fn parse_fragment(
         }
         PatternFragment::Nested(list) => parse_pattern_list(list, state, capture)?,
         PatternFragment::AnyChar => {
-            quote! {untwine::char_filter::<#data, #err>(|_| true, "any character")}
+            quote! {char_filter::<#data, #err>(|_| true, "any character")}
         }
         PatternFragment::Annotated(attr) => {
             let path = &attr.name;
@@ -106,7 +106,7 @@ fn parse_fragment(
             let parser_name = &state.parser_name;
             let pattern = parse_pattern(&attr.pattern, state, capture)?;
             quote! {
-                #path(#pattern, untwine::ParserMeta { parser_name: #parser_name, pattern_string: #pattern_string }, #(#args),*)
+                #path(#pattern, ParserMeta { parser_name: #parser_name, pattern_string: #pattern_string }, #(#args),*)
             }
         }
     };
@@ -190,13 +190,13 @@ fn parse_pattern_choices(
     }
 
     Ok(quote! {
-        untwine::parser::<#data, _, #err>(|#ctx| {
+        parser::<#data, _, #err>(|#ctx| {
             let mut __res: ParserResult<(), _> = #ctx.result(None, None);
             let start = #ctx.cursor();
 
             #(#parsers)*
             if start == __res.pos {
-                return ParserResult::new(None, Some(untwine::ParserError::ExpectedToken(#name).into()), start)
+                return ParserResult::new(None, Some(ParserError::ExpectedToken(#name).into()), start)
             }
             ParserResult::new(None, __res.error, __res.pos)
         })
@@ -242,7 +242,7 @@ fn parse_patterns(
     let data = &state.data_type;
     let ctx = &state.parser_context_name;
     Ok(quote! {
-        untwine::parser::<#data, _, #err>(|#ctx| {
+        parser::<#data, _, #err>(|#ctx| {
             let mut __res: ParserResult<(), _> = #ctx.result(None, None);
             #(
                 #parsers
@@ -294,7 +294,7 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
         quote! {#block}
     };
     Ok(quote! {
-        #vis fn #name<'p>(#ctx: &'p untwine::ParserContext<'p, #data>) -> ParserResult<#typ, #err> {
+        #vis fn #name<'p>(#ctx: &'p ParserContext<'p, #data>) -> ParserResult<#typ, #err> {
             let mut __res: ParserResult<(), _> = #ctx.result(None, None);
             let __start = #ctx.cursor();
             #(
@@ -352,8 +352,8 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
 
     Ok(quote! {
         mod #parser_name {
+            use untwine::prelude::*;
             use super::*;
-            use untwine::{Parser, ParserResult, attr::*};
 
             #(
                 #parsers
