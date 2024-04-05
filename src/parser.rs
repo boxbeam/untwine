@@ -99,13 +99,17 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
             elems.push(elem);
 
             let mut last_res = res;
+            let mut delim_start = ctx.cursor();
             while delim.parse(ctx).success.is_some() {
                 let mut res = self.parse(ctx);
                 let Some(elem) = res.success.take() else {
-                    return ParserResult::new(None, res.error, res.pos).integrate_error(last_res);
+                    return ParserResult::new(None, res.error, res.pos)
+                        .integrate_error(last_res)
+                        .set_start_if_empty(delim_start);
                 };
                 last_res = res;
                 elems.push(elem);
+                delim_start = ctx.cursor();
             }
             ParserResult::new(Some(elems), last_res.error, last_res.pos)
         })
@@ -130,13 +134,17 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
             elems.push(elem);
 
             let mut last_res = res;
+            let mut delim_start = ctx.cursor();
             while delim.parse(ctx).success.is_some() {
                 let mut res = self.parse(ctx);
                 let Some(elem) = res.success.take() else {
-                    return ParserResult::new(None, res.error, res.pos).integrate_error(last_res);
+                    return ParserResult::new(None, res.error, res.pos)
+                        .integrate_error(last_res)
+                        .set_start_if_empty(delim_start);
                 };
                 last_res = res;
                 elems.push(elem);
+                delim_start = ctx.cursor();
             }
             ParserResult::new(Some(elems), last_res.error, last_res.pos)
         })

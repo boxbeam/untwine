@@ -67,9 +67,14 @@ impl<'p, C> ParserContext<'p, C> {
     }
 }
 
+pub fn lines(s: &str) -> impl Iterator<Item = &str> {
+    s.lines()
+        .chain((s.ends_with('\n') || s.is_empty()).then_some(""))
+}
+
 /// Get the line count of a string.
 pub fn line(s: &str) -> usize {
-    s.lines().count()
+    lines(s).count()
 }
 
 /// Get the column index of the last line in a string.

@@ -227,7 +227,10 @@ fn parse_patterns(
                         __res = __res.integrate_error(res);
                         val
                     },
-                    None => return ParserResult::new(None, res.error, res.pos).integrate_error(__res),
+                    None => {
+                        #ctx.reset(__start);
+                        return ParserResult::new(None, res.error, res.pos).integrate_error(__res)
+                    },
                 }
             };
         };
@@ -244,6 +247,7 @@ fn parse_patterns(
     Ok(quote! {
         parser::<#data, _, #err>(|#ctx| {
             let mut __res: ParserResult<(), _> = #ctx.result(None, None);
+            let __start = #ctx.cursor();
             #(
                 #parsers
             )*

@@ -62,7 +62,7 @@ fn main() {
     std::io::stdout().flush().unwrap();
     for line in std::io::stdin().lines() {
         println!();
-        match untwine::parse_pretty(json, &line.unwrap()) {
+        match untwine::parse_pretty(json, &line.unwrap().replace("\\n", "\n")) {
             Ok(val) => println!("{val:?}"),
             Err(err) => println!("{err}"),
         }

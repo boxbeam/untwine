@@ -74,23 +74,12 @@ impl<T, E> ParserResult<T, E> {
             Some(e) => format!("{e}"),
             None => "Unexpected token or end of input".to_string(),
         };
+
         let line = line(&ctx.input[..self.pos.end]);
         let col = col(&ctx.input[..self.pos.end]);
-        let error_line = ctx
-            .input
-            .lines()
-            .nth(line.checked_sub(1).unwrap_or(0))
-            .unwrap_or_default();
-
-        let min = col.checked_sub(40).unwrap_or(0);
-        let max = error_line.len().min(col + 40);
-        let selection_len = self.pos.len().min(col - min);
-
-        let error_part = &error_line[min as usize..max as usize];
-        let padding = " ".repeat(col.checked_sub(min + selection_len).unwrap_or(0))
-            + &"-".repeat(selection_len);
+        let display = show_span(ctx.input, self.pos.clone());
         let err = format!(
-            "{error_part}\n{padding}^\n[{line}:{col}]: {error}",
+            "{display}\n[{line}:{col}] {error}",
             line = line.max(1),
             col = col.max(1)
         );
@@ -109,5 +98,79 @@ impl<T, E> ParserResult<T, E> {
             }
         }
         return Err(self.error.unwrap_or_default());
+    }
+}
+
+pub fn show_span(input: &str, span: Range<usize>) -> String {
+    let lines: Vec<_> = lines(input).collect();
+
+    let (start_line, start_col) = (
+        line(&input[..span.start]).checked_sub(1).unwrap_or(0),
+        col(&input[..span.start]),
+    );
+    let (start_range, start_cursor) = get_error_line(&lines, start_line, start_col);
+
+    let (end_line, end_col) = (
+        line(&input[..span.end]).checked_sub(1).unwrap_or(0),
+        col(&input[..span.end]),
+    );
+    let (end_range, end_cursor) = get_error_line(&lines, end_line, end_col);
+
+    if start_line == end_line {
+        let line_num = (end_line + 1).to_string();
+        let outer_pad = " ".repeat(line_num.len() + 3);
+        let line_pad = format!("{line_num} \x1b[34;1m|\x1b[0m ");
+
+        let diff = (end_col - start_col).min(end_cursor - end_range.start);
+        let spaces = " ".repeat(start_col);
+        let underline = "-".repeat(diff);
+        format!(
+            "{line_pad}{line}\n{outer_pad}{spaces}\x1b[31m{underline}^\x1b[0m",
+            line = &lines[end_line][end_range]
+        )
+    } else {
+        let top_line_num = (start_line + 1).to_string();
+        let bottom_line_num = (end_line + 1).to_string();
+        let left_pad = top_line_num.len().max(bottom_line_num.len()) + 1;
+        let top_line_pad = format!(
+            "{top_line_num}{pad}\x1b[34;1m|\x1b[0m ",
+            pad = " ".repeat(left_pad - top_line_num.len())
+        );
+        let middle_line_pad = format!("{pad}\x1b[34;1m|\x1b[0m ", pad = " ".repeat(left_pad));
+        let bottom_line_pad = format!(
+            "{bottom_line_num}{pad}\x1b[34;1m|\x1b[0m ",
+            pad = " ".repeat(left_pad - bottom_line_num.len())
+        );
+        let outer_pad = " ".repeat(left_pad + 2);
+
+        let top_line = &lines[start_line][start_range];
+        let top_line = format!(
+            "\x1b[33m{outer_pad}{spaces}| beginning here\n{outer_pad}{spaces}v\n\x1b[0m{top_line_pad}{top_line}",
+            spaces = " ".repeat(start_cursor),
+        );
+
+        let middle_line = (end_line - start_line > 1)
+            .then_some(middle_line_pad + "\x1b[34m...\x1b[0m\n")
+            .unwrap_or_default();
+
+        let bottom_line = format!(
+            "{bottom_line_pad}{line}\n{outer_pad}\x1b[31m{underline}^\x1b[0m",
+            line = &lines[end_line][end_range.clone()],
+            underline = "-".repeat(end_col - end_range.start)
+        );
+        format!("{top_line}\n{middle_line}{bottom_line}")
+    }
+}
+
+fn get_error_line<'a>(lines: &'a [&'a str], line: usize, col: usize) -> (Range<usize>, usize) {
+    let line = lines.get(line).map(|s| *s).unwrap_or_default();
+    if col < 40 {
+        let end = line.len().min(80);
+        (0..end, col)
+    } else if line.len() - col < 40 {
+        let start = (line.len() - 80).max(0);
+        (start..line.len(), col - start)
+    } else {
+        (0..line.len(), col)
     }
 }
