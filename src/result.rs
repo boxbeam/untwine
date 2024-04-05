@@ -105,13 +105,13 @@ pub fn show_span(input: &str, span: Range<usize>) -> String {
     let lines: Vec<_> = lines(input).collect();
 
     let (start_line, start_col) = (
-        line(&input[..span.start]).checked_sub(1).unwrap_or(0),
+        line(&input[..span.start]).saturating_sub(1),
         col(&input[..span.start]),
     );
     let (start_range, start_cursor) = get_error_line(&lines, start_line, start_col);
 
     let (end_line, end_col) = (
-        line(&input[..span.end]).checked_sub(1).unwrap_or(0),
+        line(&input[..span.end]).saturating_sub(1),
         col(&input[..span.end]),
     );
     let (end_range, end_cursor) = get_error_line(&lines, end_line, end_col);
