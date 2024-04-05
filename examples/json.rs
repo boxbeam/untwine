@@ -52,11 +52,6 @@ parser! {
     pub json = (bool | null | str | float | int | list | map) -> JSONValue;
 }
 
-parser! {
-    num: digits=<'0'-'9'+> -> i32 { digits.parse().unwrap() }
-    pub num_list = num$","+ -> Vec<i32>;
-}
-
 fn main() {
     print!("> ");
     std::io::stdout().flush().unwrap();
