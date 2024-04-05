@@ -7,7 +7,7 @@ macros = { package = "untwine_macros", path = "macros", version = "0.1.0" }
 
 [package]
 name = "untwine"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Declarative parsing with a BNF-like syntax"
 authors = ["boxbeam"]
