@@ -65,40 +65,47 @@ impl<T, E> ParserResult<T, E> {
         self
     }
 
-    /// Generate a pretty error message visually pointing out the location of the error.
-    pub fn pretty<C>(self, ctx: &ParserContext<C>) -> ParserResult<T, String>
+    fn require_complete<C>(mut self, ctx: &ParserContext<C>) -> Self {
+        if ctx.cursor() == self.pos.end {
+            self
+        } else {
+            self.success = None;
+            self
+        }
+    }
+
+    pub fn pretty_result<C>(mut self, ctx: &ParserContext<C>) -> Result<T, String>
     where
         E: Display,
     {
+        self = self.require_complete(ctx);
+        if let Some(success) = self.success {
+            return Ok(success);
+        }
         let error = match self.error {
-            Some(e) => format!("{e}"),
+            Some(e) => e.to_string(),
             None => "Unexpected token or end of input".to_string(),
         };
-
-        let line = line(&ctx.input[..self.pos.end]);
-        let col = col(&ctx.input[..self.pos.end]);
-        let display = show_span(ctx.input, self.pos.clone());
-        let err = format!(
-            "{display}\n[{line}:{col}] {error}",
-            line = line.max(1),
-            col = col.max(1)
-        );
-        ParserResult::new(self.success, Some(err), self.pos)
+        Err(pretty_error(ctx.input, self.pos, error))
     }
 
     /// Convert this into a [Result]. If the entire input was not consumed, the parser is treated as having failed,
-    /// even if a success value is present. The default error will be used if one is not already present.
-    pub fn result<C>(self, ctx: &ParserContext<C>) -> Result<T, E>
-    where
-        E: Default,
-    {
-        if ctx.cursor() == ctx.input.len() {
-            if let Some(success) = self.success {
-                return Ok(success);
-            }
-        }
-        return Err(self.error.unwrap_or_default());
+    /// even if a success value is present.
+    pub fn result<C>(mut self, ctx: &ParserContext<C>) -> Result<T, Option<E>> {
+        self = self.require_complete(ctx);
+        self.success.ok_or(self.error)
     }
+}
+
+pub fn pretty_error(input: &str, span: Range<usize>, error: String) -> String {
+    let line = line(&input[..span.end]);
+    let col = col(&input[..span.end]);
+    let display = show_span(input, span.clone());
+    format!(
+        "{display}\n[{line}:{col}] {error}",
+        line = line.max(1),
+        col = col.max(1)
+    )
 }
 
 pub fn show_span(input: &str, span: Range<usize>) -> String {

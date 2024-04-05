@@ -174,9 +174,10 @@ fn parse_pattern_choices(
     for parser in patterns {
         let parser = parse_patterns(parser, state, capture)?;
 
+        let ignore = (!capture).then(|| quote! {.ignore()});
         parsers.push(quote! {
             {
-                let res = #parser.parse(#ctx);
+                let res = #parser #ignore.parse(#ctx);
                 match res.success {
                     Some(val) => return ParserResult::new(Some(val), res.error, res.pos).integrate_error(__res),
                     None => {

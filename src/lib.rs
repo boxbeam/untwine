@@ -48,7 +48,7 @@ use prelude::*;
 pub fn parse<C, T, E>(
     parser: impl for<'a> Fn(&'a ParserContext<'a, C>) -> ParserResult<T, E>,
     input: &str,
-) -> Result<T, E>
+) -> Result<T, Option<E>>
 where
     C: Default,
     E: Default,
@@ -68,5 +68,5 @@ where
     E: Display,
 {
     let ctx = ParserContext::new(input, Default::default());
-    parser(&ctx).pretty(&ctx).result(&ctx)
+    parser(&ctx).pretty_result(&ctx)
 }
