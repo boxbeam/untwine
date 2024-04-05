@@ -59,7 +59,7 @@ checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
 
 [[package]]
 name = "untwine"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -70,7 +70,7 @@ dependencies = [
 
 [[package]]
 name = "untwine_macros"
-version = "0.2.0"
+version = "0.3.2"
 dependencies = [
  "proc-macro2",
  "quote",

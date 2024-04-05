@@ -3,11 +3,11 @@ members = ["macros"]
 
 [workspace.dependencies]
 thiserror = {version = "1.0.58"}
-macros = { package = "untwine_macros", path = "macros", version = "0.2.0" }
+macros = { package = "untwine_macros", path = "macros", version = "0.3.2" }
 
 [package]
 name = "untwine"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 description = "Declarative parsing with a BNF-like syntax"
 authors = ["boxbeam"]
