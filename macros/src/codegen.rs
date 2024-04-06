@@ -252,7 +252,7 @@ fn parse_patterns(
             #(
                 #parsers
             )*
-            ParserResult::new(Some(( #(#captured),* )), __res.error, __res.pos)
+            ParserResult::new(Some(( #(#captured),* )), __res.error, __res.pos).set_start_if_empty(__start)
         })
     })
 }
