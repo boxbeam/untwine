@@ -1,10 +1,9 @@
 use std::{
     collections::HashMap,
-    io::Write,
     num::{ParseFloatError, ParseIntError},
 };
 
-use untwine::parser;
+use untwine::{parser, parser_repl};
 
 #[derive(Debug)]
 pub enum JSONValue {
@@ -53,15 +52,5 @@ parser! {
 }
 
 fn main() {
-    print!("> ");
-    std::io::stdout().flush().unwrap();
-    for line in std::io::stdin().lines() {
-        println!();
-        match untwine::parse_pretty(json, &line.unwrap().replace("\\n", "\n")) {
-            Ok(val) => println!("{val:?}"),
-            Err(err) => println!("{err}"),
-        }
-        print!("\n> ");
-        std::io::stdout().flush().unwrap();
-    }
+    parser_repl(json);
 }

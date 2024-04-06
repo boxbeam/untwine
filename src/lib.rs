@@ -20,7 +20,10 @@
 //! }
 //! ```
 
-use std::fmt::Display;
+use std::{
+    fmt::{Debug, Display},
+    io::Write,
+};
 
 pub mod error;
 pub use error::ParserError;
@@ -69,4 +72,25 @@ where
 {
     let ctx = ParserContext::new(input, Default::default());
     parser(&ctx).pretty_result(&ctx)
+}
+
+/// Launches a (very) simple REPL where you can enter individual lines and see the parser output, useful for testing.
+/// Multiline inputs are not supported, so literal `\n` in the input will be replaced with a newline.
+pub fn parser_repl<C, T, E>(parser: impl for<'a> Fn(&'a ParserContext<'a, C>) -> ParserResult<T, E>)
+where
+    T: Debug,
+    C: Default,
+    E: Display,
+{
+    print!("> ");
+    std::io::stdout().flush().unwrap();
+    for line in std::io::stdin().lines() {
+        println!();
+        match parse_pretty(&parser, &line.unwrap().replace("\\n", "\n")) {
+            Ok(val) => println!("{val:#?}"),
+            Err(err) => println!("{err}"),
+        }
+        print!("\n> ");
+        std::io::stdout().flush().unwrap();
+    }
 }

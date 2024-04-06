@@ -66,7 +66,7 @@ impl<T, E> ParserResult<T, E> {
     }
 
     fn require_complete<C>(mut self, ctx: &ParserContext<C>) -> Self {
-        if ctx.cursor() == self.pos.end {
+        if ctx.cursor() == ctx.input.len() {
             self
         } else {
             self.success = None;
@@ -84,7 +84,8 @@ impl<T, E> ParserResult<T, E> {
         }
         let error = match self.error {
             Some(e) => e.to_string(),
-            None => "Unexpected token or end of input".to_string(),
+            None if ctx.cursor() == ctx.input.len() => "Unexpected end of input".to_string(),
+            None => "Unexpected token".to_string(),
         };
         Err(pretty_error(ctx.input, self.pos, error))
     }
@@ -126,7 +127,7 @@ pub fn show_span(input: &str, span: Range<usize>) -> String {
     if start_line == end_line {
         let line_num = (end_line + 1).to_string();
         let outer_pad = " ".repeat(line_num.len() + 3);
-        let line_pad = format!("{line_num} \x1b[34;1m|\x1b[0m ");
+        let line_pad = format!("\x1b[37;1m{line_num} \x1b[34;1m|\x1b[0m ");
 
         let diff = (end_col - start_col).min(end_cursor - end_range.start);
         let spaces = " ".repeat(start_col);
@@ -140,12 +141,12 @@ pub fn show_span(input: &str, span: Range<usize>) -> String {
         let bottom_line_num = (end_line + 1).to_string();
         let left_pad = top_line_num.len().max(bottom_line_num.len()) + 1;
         let top_line_pad = format!(
-            "{top_line_num}{pad}\x1b[34;1m|\x1b[0m ",
+            "\x1b[37;1m{top_line_num}{pad}\x1b[34;1m|\x1b[0m ",
             pad = " ".repeat(left_pad - top_line_num.len())
         );
         let middle_line_pad = format!("{pad}\x1b[34;1m|\x1b[0m ", pad = " ".repeat(left_pad));
         let bottom_line_pad = format!(
-            "{bottom_line_num}{pad}\x1b[34;1m|\x1b[0m ",
+            "\x1b[37;1m{bottom_line_num}{pad}\x1b[34;1m|\x1b[0m ",
             pad = " ".repeat(left_pad - bottom_line_num.len())
         );
         let outer_pad = " ".repeat(left_pad + 2);

@@ -106,7 +106,7 @@ fn parse_fragment(
             let parser_name = &state.parser_name;
             let pattern = parse_pattern(&attr.pattern, state, capture)?;
             quote! {
-                #path(#pattern, ParserMeta { parser_name: #parser_name, pattern_string: #pattern_string }, #(#args),*)
+                #path(#pattern, PatternMeta { parser_name: #parser_name, pattern_string: #pattern_string }, #(#args),*)
             }
         }
     };

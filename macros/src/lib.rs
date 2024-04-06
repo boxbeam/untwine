@@ -464,7 +464,6 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
     }
 }
 
-#[proc_macro]
 /// Generate parsers using a series of declarative patterns and blocks evaluating their values.
 ///
 /// Parsers, or "rules", are structured similarly to regular rust functions, and will be converted into
@@ -503,7 +502,8 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 ///   - `pattern$delimiter*` - Similar to the above, but allows zero matches.
 ///   - `#pattern` - Ignores the output of the modified pattern, making it return `()`.
 ///   - `#[dbg] pattern` - Print the debug output of the pattern after parsing.
-///   - `#[ident] pattern` - The above syntax is not a special case, `untwine::attr::dbg` is its implementation. Any similar function can be used as an attribute.
+///     - The above syntax is not a special case, `untwine::attr::dbg` is its implementation. Any similar function can be used as an attribute.
+///     - Additional parameters can be passed like `#[myattr(1, "hello")]`.
 ///
 /// ## Special syntax for parsers
 /// There is an alternate syntax for parsers whose output needs no modification.
@@ -538,6 +538,7 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 ///
 /// To use one of these parsers, you can either construct a `ParserContext` and call it as normal, or use `untwine::parse` / `untwine::parse_pretty` to get
 /// a regular [Result] instead of untwine's `ParserResult` type.
+#[proc_macro]
 pub fn parser(input: TokenStream) -> TokenStream {
     let block: ParserBlock = parse_macro_input!(input as ParserBlock);
 
