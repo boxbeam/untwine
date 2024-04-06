@@ -245,7 +245,7 @@ fn get_error_line<'a>(lines: &'a [&'a str], line: usize, col: usize) -> (Range<u
         let end = line.len().min(80);
         (0..end, col)
     } else if line.len() - col < 40 {
-        let start = (line.len() - 80).max(0);
+        let start = line.len().saturating_sub(80);
         (start..line.len(), col - start)
     } else {
         (0..line.len(), col)
