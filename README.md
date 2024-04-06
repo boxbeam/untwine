@@ -6,7 +6,7 @@ Untwine is a declarative parsing library which allows a style of parsing which i
 This allows the creation of extremely compact parsers with decent performance characteristics and high-quality error messages.
 These parsers are simple to implement, with a couple cherry-picked examples being:
 - A nearly-complete JSON parser in 12 lines of parsing logic
-  - Supports all basic JSON functionality except for special escape sequences (other than \")
+  - Supports all basic JSON functionality except for special escape sequences (those other than \\")
 - A pmdas-respecting four-operation expression parser in 6 lines of parsing logic
   - And one helper function to operate on two numbers
 
@@ -78,5 +78,5 @@ it is not suitable for highly performance-critical parsers.
 
 Most parsing is not so performance-critical, and Untwine is ideal for building programming languages or DSLs,
 though it can also be used for other purposes. It seeks to make parsing so easy that it becomes worthwhile to write
-parsers where it may not have before, giving you the ability to iterate extremely quickly and eliminate most of
+parsers where it may not have been before, giving you the ability to iterate extremely quickly and eliminate most of
 the pain points of parsing at compiletime, before the parser ever runs.
