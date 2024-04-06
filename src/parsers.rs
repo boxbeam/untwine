@@ -1,5 +1,6 @@
 use crate::{parser, Parser, ParserError, ParserResult};
 
+/// Create a parser which parses a string literal. Generates errors for partial matches.
 pub fn literal<'p, C, E>(s: &'static str) -> impl Parser<'p, C, (), E>
 where
     C: 'p,
@@ -22,6 +23,7 @@ where
     })
 }
 
+/// Create a parser which parses a single character matching a predicate.
 pub fn char_filter<'p, C, E>(
     f: impl Fn(&char) -> bool + 'static,
     token_name: &'static str,

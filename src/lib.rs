@@ -46,6 +46,7 @@ pub mod prelude {
 }
 
 use prelude::*;
+use result::PrettyOptions;
 
 /// Parse a value with a parser function created by the [parser!] block.
 pub fn parse<C, T, E>(
@@ -64,14 +65,14 @@ where
 pub fn parse_pretty<C, T, E>(
     parser: impl for<'a> Fn(&'a ParserContext<'a, C>) -> ParserResult<T, E>,
     input: &str,
-    color: bool,
+    colors: PrettyOptions,
 ) -> Result<T, String>
 where
     C: Default,
     E: Display,
 {
     let ctx = ParserContext::new(input, Default::default());
-    parser(&ctx).pretty_result(&ctx, color)
+    parser(&ctx).pretty_result(&ctx, colors)
 }
 
 /// Launches a (very) simple REPL where you can enter individual lines and see the parser output, useful for testing.
@@ -86,7 +87,11 @@ where
     std::io::stdout().flush().unwrap();
     for line in std::io::stdin().lines() {
         println!();
-        match parse_pretty(&parser, &line.unwrap().replace("\\n", "\n"), true) {
+        match parse_pretty(
+            &parser,
+            &line.unwrap().replace("\\n", "\n"),
+            PrettyOptions::default(),
+        ) {
             Ok(val) => println!("{val:#?}"),
             Err(err) => println!("{err}"),
         }

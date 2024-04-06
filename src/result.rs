@@ -58,6 +58,7 @@ impl<T, E> ParserResult<T, E> {
         }
     }
 
+    /// Set the start of the error range if it hasn't already been set.
     pub fn set_start_if_empty(mut self, start: usize) -> Self {
         if self.pos.is_empty() {
             self.pos.start = start;
@@ -74,7 +75,13 @@ impl<T, E> ParserResult<T, E> {
         }
     }
 
-    pub fn pretty_result<C>(mut self, ctx: &ParserContext<C>, color: bool) -> Result<T, String>
+    /// Convert this into a [Result], and generate a pretty error if parsing failed. Parsing is also counted as failed
+    /// if the entire input was not consumed, even if a success value is present.
+    pub fn pretty_result<C>(
+        mut self,
+        ctx: &ParserContext<C>,
+        options: PrettyOptions,
+    ) -> Result<T, String>
     where
         E: Display,
     {
@@ -87,7 +94,7 @@ impl<T, E> ParserResult<T, E> {
             None if ctx.cursor() == ctx.input.len() => "Unexpected end of input".to_string(),
             None => "Unexpected token".to_string(),
         };
-        Err(pretty_error(ctx.input, self.pos, error, color))
+        Err(pretty_error(ctx.input, self.pos, error, options))
     }
 
     /// Convert this into a [Result]. If the entire input was not consumed, the parser is treated as having failed,
@@ -98,10 +105,63 @@ impl<T, E> ParserResult<T, E> {
     }
 }
 
-pub fn pretty_error(input: &str, span: Range<usize>, error: String, color: bool) -> String {
+/// Options to configure the output of pretty errors
+pub struct PrettyOptions {
+    /// The color to use on the indicators for the line number at the beginning
+    line_number_color: &'static str,
+    /// The color code used for everything that is not usually colored
+    default_color: &'static str,
+    /// The color used on the border between the line numbers and the displayed input
+    separator_color: &'static str,
+    /// The color of the underline pointing to the error
+    error_indicator_color: &'static str,
+    /// The color of the arrow indicating the beginning position on multiline errors
+    start_pointer_color: &'static str,
+    /// The text giving info about the beginning position on multiline errors, defaults to `beginning here`
+    start_pointer_text: &'static str,
+    /// Whether to show the ^ at the position one past the error, where the insertion is probably expected
+    show_caret: bool,
+}
+
+impl PrettyOptions {
+    /// No colors
+    pub fn none() -> Self {
+        PrettyOptions {
+            line_number_color: "",
+            default_color: "",
+            separator_color: "",
+            error_indicator_color: "",
+            start_pointer_color: "",
+            start_pointer_text: "beginning here",
+            show_caret: true,
+        }
+    }
+}
+
+impl Default for PrettyOptions {
+    fn default() -> Self {
+        PrettyOptions {
+            line_number_color: "\x1b[37;1m",
+            default_color: "\x1b[0m",
+            separator_color: "\x1b[34;1m",
+            error_indicator_color: "\x1b[31m",
+            start_pointer_color: "\x1b[33m",
+            start_pointer_text: "beginning here",
+            show_caret: true,
+        }
+    }
+}
+
+/// Generate a pretty error with a specified message.
+pub fn pretty_error(
+    input: &str,
+    span: Range<usize>,
+    error: String,
+    colors: PrettyOptions,
+) -> String {
     let line = line(&input[..span.end]);
     let col = col(&input[..span.end]);
-    let display = show_span(input, span.clone(), color);
+    let display = show_span(input, span.clone(), colors);
     format!(
         "{display}\n[{line}:{col}] {error}",
         line = line.max(1),
@@ -109,14 +169,17 @@ pub fn pretty_error(input: &str, span: Range<usize>, error: String, color: bool)
     )
 }
 
-pub fn show_span(input: &str, span: Range<usize>, color: bool) -> String {
+/// Generate a display to point out a range in source code.
+pub fn show_span(input: &str, span: Range<usize>, options: PrettyOptions) -> String {
     let lines: Vec<_> = lines(input).collect();
 
-    let bold_white = color.then_some("\x1b[37;1m").unwrap_or("");
-    let reset = color.then_some("\x1b[0m").unwrap_or("");
-    let blue = color.then_some("\x1b[34;1m").unwrap_or("");
-    let red = color.then_some("\x1b[31m").unwrap_or("");
-    let yellow = color.then_some("\x1b[33m").unwrap_or("");
+    let bold_white = options.line_number_color;
+    let reset = options.default_color;
+    let blue = options.separator_color;
+    let red = options.error_indicator_color;
+    let yellow = options.start_pointer_color;
+    let overline_text = options.start_pointer_text;
+    let caret = options.show_caret.then_some("^").unwrap_or("");
 
     let (start_line, start_col) = (
         line(&input[..span.start]).saturating_sub(1),
@@ -159,7 +222,7 @@ pub fn show_span(input: &str, span: Range<usize>, color: bool) -> String {
 
         let top_line = &lines[start_line][start_range];
         let top_line = format!(
-            "{yellow}{outer_pad}{spaces}| beginning here\n{outer_pad}{spaces}v\n{reset}{top_line_pad}{top_line}",
+            "{yellow}{outer_pad}{spaces}| {overline_text}\n{outer_pad}{spaces}v\n{reset}{top_line_pad}{top_line}",
             spaces = " ".repeat(start_cursor),
         );
 
@@ -168,7 +231,7 @@ pub fn show_span(input: &str, span: Range<usize>, color: bool) -> String {
             .unwrap_or_default();
 
         let bottom_line = format!(
-            "{bottom_line_pad}{line}\n{outer_pad}{red}{underline}^{reset}",
+            "{bottom_line_pad}{line}\n{outer_pad}{red}{underline}{caret}{reset}",
             line = &lines[end_line][end_range.clone()],
             underline = "-".repeat(end_col - end_range.start)
         );
