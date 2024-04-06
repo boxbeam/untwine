@@ -74,7 +74,7 @@ impl<T, E> ParserResult<T, E> {
         }
     }
 
-    pub fn pretty_result<C>(mut self, ctx: &ParserContext<C>) -> Result<T, String>
+    pub fn pretty_result<C>(mut self, ctx: &ParserContext<C>, color: bool) -> Result<T, String>
     where
         E: Display,
     {
@@ -87,7 +87,7 @@ impl<T, E> ParserResult<T, E> {
             None if ctx.cursor() == ctx.input.len() => "Unexpected end of input".to_string(),
             None => "Unexpected token".to_string(),
         };
-        Err(pretty_error(ctx.input, self.pos, error))
+        Err(pretty_error(ctx.input, self.pos, error, color))
     }
 
     /// Convert this into a [Result]. If the entire input was not consumed, the parser is treated as having failed,
@@ -98,10 +98,10 @@ impl<T, E> ParserResult<T, E> {
     }
 }
 
-pub fn pretty_error(input: &str, span: Range<usize>, error: String) -> String {
+pub fn pretty_error(input: &str, span: Range<usize>, error: String, color: bool) -> String {
     let line = line(&input[..span.end]);
     let col = col(&input[..span.end]);
-    let display = show_span(input, span.clone());
+    let display = show_span(input, span.clone(), color);
     format!(
         "{display}\n[{line}:{col}] {error}",
         line = line.max(1),
@@ -109,8 +109,14 @@ pub fn pretty_error(input: &str, span: Range<usize>, error: String) -> String {
     )
 }
 
-pub fn show_span(input: &str, span: Range<usize>) -> String {
+pub fn show_span(input: &str, span: Range<usize>, color: bool) -> String {
     let lines: Vec<_> = lines(input).collect();
+
+    let bold_white = color.then_some("\x1b[37;1m").unwrap_or("");
+    let reset = color.then_some("\x1b[0m").unwrap_or("");
+    let blue = color.then_some("\x1b[34;1m").unwrap_or("");
+    let red = color.then_some("\x1b[31m").unwrap_or("");
+    let yellow = color.then_some("\x1b[33m").unwrap_or("");
 
     let (start_line, start_col) = (
         line(&input[..span.start]).saturating_sub(1),
@@ -127,13 +133,13 @@ pub fn show_span(input: &str, span: Range<usize>) -> String {
     if start_line == end_line {
         let line_num = (end_line + 1).to_string();
         let outer_pad = " ".repeat(line_num.len() + 3);
-        let line_pad = format!("\x1b[37;1m{line_num} \x1b[34;1m|\x1b[0m ");
+        let line_pad = format!("{bold_white}{line_num} {blue}|{reset} ");
 
         let diff = (end_col - start_col).min(end_cursor - end_range.start);
         let spaces = " ".repeat(start_col);
         let underline = "-".repeat(diff);
         format!(
-            "{line_pad}{line}\n{outer_pad}{spaces}\x1b[31m{underline}^\x1b[0m",
+            "{line_pad}{line}\n{outer_pad}{spaces}{red}{underline}^{reset}",
             line = &lines[end_line][end_range]
         )
     } else {
@@ -141,28 +147,28 @@ pub fn show_span(input: &str, span: Range<usize>) -> String {
         let bottom_line_num = (end_line + 1).to_string();
         let left_pad = top_line_num.len().max(bottom_line_num.len()) + 1;
         let top_line_pad = format!(
-            "\x1b[37;1m{top_line_num}{pad}\x1b[34;1m|\x1b[0m ",
+            "{bold_white}{top_line_num}{pad}{blue}|{reset} ",
             pad = " ".repeat(left_pad - top_line_num.len())
         );
-        let middle_line_pad = format!("{pad}\x1b[34;1m|\x1b[0m ", pad = " ".repeat(left_pad));
+        let middle_line_pad = format!("{pad}{blue}|{reset} ", pad = " ".repeat(left_pad));
         let bottom_line_pad = format!(
-            "\x1b[37;1m{bottom_line_num}{pad}\x1b[34;1m|\x1b[0m ",
+            "{bold_white}{bottom_line_num}{pad}{blue}|{reset} ",
             pad = " ".repeat(left_pad - bottom_line_num.len())
         );
         let outer_pad = " ".repeat(left_pad + 2);
 
         let top_line = &lines[start_line][start_range];
         let top_line = format!(
-            "\x1b[33m{outer_pad}{spaces}| beginning here\n{outer_pad}{spaces}v\n\x1b[0m{top_line_pad}{top_line}",
+            "{yellow}{outer_pad}{spaces}| beginning here\n{outer_pad}{spaces}v\n{reset}{top_line_pad}{top_line}",
             spaces = " ".repeat(start_cursor),
         );
 
         let middle_line = (end_line - start_line > 1)
-            .then_some(middle_line_pad + "\x1b[34m...\x1b[0m\n")
+            .then(|| format!("{middle_line_pad}{blue}...{reset}\n"))
             .unwrap_or_default();
 
         let bottom_line = format!(
-            "{bottom_line_pad}{line}\n{outer_pad}\x1b[31m{underline}^\x1b[0m",
+            "{bottom_line_pad}{line}\n{outer_pad}{red}{underline}^{reset}",
             line = &lines[end_line][end_range.clone()],
             underline = "-".repeat(end_col - end_range.start)
         );

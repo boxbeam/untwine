@@ -471,7 +471,7 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 /// and a block to evaluate the output of the parser.
 ///
 /// ## Example of a simple parser
-/// ```
+/// ```ignore
 /// parser! {
 ///    num: digits=<'0'-'9'+> -> u32 { digits.parse().unwrap() }
 ///    pub num_list: nums=num$","+ -> Vec<u32> { nums }
@@ -508,7 +508,7 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 /// ## Special syntax for parsers
 /// There is an alternate syntax for parsers whose output needs no modification.
 /// The example parser `num_list` above could also be written like this:
-/// ```
+/// ```ignore
 /// parser! {
 ///    num: digits=<'0'-'9'+> -> u32 { digits.parse().unwrap() }
 ///    pub num_list = nums=num$","+ -> Vec<u32>;
@@ -521,7 +521,7 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 /// ## Configuring a parser block
 /// There are some values that can be adjusted to change the behavior of a parser.
 /// These arguments are specified inside `[]` prior to defining any parsers:
-/// ```
+/// ```ignore
 /// parser! {
 ///     [error = MyErrorType]
 ///     ...

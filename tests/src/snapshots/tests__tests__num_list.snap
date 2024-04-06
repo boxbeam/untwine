@@ -1,0 +1,7 @@
+---
+source: tests/src/lib.rs
+expression: "untwine::parse_pretty(num_list, \"1,2,\", false).unwrap_err()"
+---
+1 | 1,2,
+       -^
+[1:4] Expected num

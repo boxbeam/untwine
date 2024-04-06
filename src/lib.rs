@@ -54,7 +54,6 @@ pub fn parse<C, T, E>(
 ) -> Result<T, Option<E>>
 where
     C: Default,
-    E: Default,
 {
     let ctx = ParserContext::new(input, Default::default());
     parser(&ctx).result(&ctx)
@@ -65,13 +64,14 @@ where
 pub fn parse_pretty<C, T, E>(
     parser: impl for<'a> Fn(&'a ParserContext<'a, C>) -> ParserResult<T, E>,
     input: &str,
+    color: bool,
 ) -> Result<T, String>
 where
     C: Default,
     E: Display,
 {
     let ctx = ParserContext::new(input, Default::default());
-    parser(&ctx).pretty_result(&ctx)
+    parser(&ctx).pretty_result(&ctx, color)
 }
 
 /// Launches a (very) simple REPL where you can enter individual lines and see the parser output, useful for testing.
@@ -86,7 +86,7 @@ where
     std::io::stdout().flush().unwrap();
     for line in std::io::stdin().lines() {
         println!();
-        match parse_pretty(&parser, &line.unwrap().replace("\\n", "\n")) {
+        match parse_pretty(&parser, &line.unwrap().replace("\\n", "\n"), true) {
             Ok(val) => println!("{val:#?}"),
             Err(err) => println!("{err}"),
         }
