@@ -202,13 +202,13 @@ pub fn show_span(input: &str, span: Range<usize>, options: PrettyOptions) -> Str
         let spaces = " ".repeat(start_col);
         let underline = "-".repeat(diff);
         format!(
-            "{line_pad}{line}\n{outer_pad}{spaces}{red}{underline}^{reset}",
+            "{line_pad}{line}\n{outer_pad}{spaces}{red}{underline}{caret}{reset}",
             line = &lines[end_line][end_range]
         )
     } else {
         let top_line_num = (start_line + 1).to_string();
         let bottom_line_num = (end_line + 1).to_string();
-        let left_pad = top_line_num.len().max(bottom_line_num.len()) + 1;
+        let left_pad = bottom_line_num.len() + 1;
         let top_line_pad = format!(
             "{bold_white}{top_line_num}{pad}{blue}|{reset} ",
             pad = " ".repeat(left_pad - top_line_num.len())
