@@ -1,7 +1,7 @@
 ---
 source: tests/src/lib.rs
-expression: "untwine::parse_pretty(expr, \"1.\", false).unwrap_err()"
+expression: "untwine::parse_pretty(expr, \"1.\", PrettyOptions::none()).unwrap_err()"
 ---
 1 | 1.
-      ^
+    --^
 [1:2] Expected num
