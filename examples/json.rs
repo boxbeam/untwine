@@ -52,5 +52,7 @@ parser! {
 }
 
 fn main() {
-    parser_repl(json);
+    // parser_repl(json);
+    let input = include_str!("/home/june/Downloads/big.json");
+    untwine::parse(json, input);
 }

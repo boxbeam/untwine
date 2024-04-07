@@ -9,6 +9,10 @@ use syn::{Result, Type, Visibility};
 
 use crate::{Modifier, ParserBlock, ParserDef, Pattern, PatternFragment, PatternList};
 
+use self::opts::{build_lookahead_map, generate_lookahead_table, NextChar};
+
+mod opts;
+
 pub fn option_of(typ: &Type) -> Type {
     if is_unit(typ) {
         return typ.clone();
@@ -39,6 +43,7 @@ struct CodegenState {
     data_type: Type,
     parser_name: String,
     parser_types: HashMap<String, Type>,
+    parser_lookaheads: HashMap<String, Vec<NextChar>>,
 }
 
 fn parse_fragment(
@@ -155,7 +160,7 @@ fn parse_pattern_list(
 ) -> Result<TokenStream> {
     match patterns {
         PatternList::List(list) => parse_patterns(list, state, capture),
-        PatternList::Choices(choices) => parse_pattern_choices(choices, state, capture),
+        PatternList::Choices(choices) => generate_lookahead_table(choices, state, capture),
     }
 }
 
@@ -332,6 +337,7 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
     parser_name.hash(&mut hasher);
     let hash = hasher.finish();
     let parser_name = Ident::new(&format!("__parser_{hash}"), Span::call_site());
+    let lookaheads = dbg!(build_lookahead_map(&block));
 
     let mut state = CodegenState {
         parser_context_name: block.header.ctx_name,
@@ -339,6 +345,7 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
         data_type: block.header.data_type,
         parser_name: Default::default(),
         parser_types,
+        parser_lookaheads: lookaheads,
     };
 
     let mut parsers = vec![];
