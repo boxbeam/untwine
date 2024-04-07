@@ -3,7 +3,7 @@ use std::{fmt::Display, ops::Range};
 use crate::context::*;
 
 #[derive(Debug)]
-/// The output of a [crate::parser::Parser]
+/// The output of a [`crate::parser::Parser`]
 pub struct ParserResult<T, E> {
     /// The successfully-parsed value.
     pub success: Option<T>,
@@ -40,7 +40,7 @@ impl<T, E> ParserResult<T, E> {
         }
     }
 
-    /// Integrate the error of another [ParserResult], if its position is higher.
+    /// Integrate the error of another [`ParserResult`], if its position is higher.
     pub fn integrate_error<V>(mut self, other: ParserResult<V, E>) -> Self {
         if other.pos.end > self.pos.end {
             self.error = other.error;
@@ -49,7 +49,7 @@ impl<T, E> ParserResult<T, E> {
         self
     }
 
-    /// Generate a [ParserResult] holding a success value and no error.
+    /// Generate a [`ParserResult`] holding a success value and no error.
     pub fn success(result: T, pos: usize) -> Self {
         ParserResult {
             success: Some(result),
@@ -125,7 +125,7 @@ pub struct PrettyOptions {
 
 impl PrettyOptions {
     /// No colors
-    pub fn none() -> Self {
+    pub fn no_color() -> Self {
         PrettyOptions {
             line_number_color: "",
             default_color: "",
@@ -153,6 +153,7 @@ impl Default for PrettyOptions {
 }
 
 /// Generate a pretty error with a specified message.
+#[must_use]
 pub fn pretty_error(
     input: &str,
     span: Range<usize>,
@@ -170,6 +171,7 @@ pub fn pretty_error(
 }
 
 /// Generate a display to point out a range in source code.
+#[must_use]
 pub fn show_span(input: &str, span: Range<usize>, options: PrettyOptions) -> String {
     let lines: Vec<_> = lines(input).collect();
 
@@ -179,7 +181,7 @@ pub fn show_span(input: &str, span: Range<usize>, options: PrettyOptions) -> Str
     let red = options.error_indicator_color;
     let yellow = options.start_pointer_color;
     let overline_text = options.start_pointer_text;
-    let caret = options.show_caret.then_some("^").unwrap_or("");
+    let caret = if options.show_caret { "^" } else { "" };
 
     let (start_line, start_col) = (
         line(&input[..span.start]).saturating_sub(1),
@@ -240,7 +242,7 @@ pub fn show_span(input: &str, span: Range<usize>, options: PrettyOptions) -> Str
 }
 
 fn get_error_line<'a>(lines: &'a [&'a str], line: usize, col: usize) -> (Range<usize>, usize) {
-    let line = lines.get(line).map(|s| *s).unwrap_or_default();
+    let line = lines.get(line).copied().unwrap_or_default();
     if col < 40 {
         let end = line.len().min(80);
         (0..end, col)

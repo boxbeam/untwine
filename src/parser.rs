@@ -5,7 +5,7 @@ use crate::{context::ParserContext, result::ParserResult};
 /// The fundamental parsing construct for untwine. A simple parser which comes with combinators
 /// for modifying its behavior.
 pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
-    /// Parse a value from the [ParserContext]. On fail, the context will be reset to the starting position.
+    /// Parse a value from the [`ParserContext`]. On fail, the context will be reset to the starting position.
     fn parse(&self, ctx: &'p ParserContext<'p, C>) -> ParserResult<T, E>;
 
     /// Map the output value using a mapping function.
@@ -200,7 +200,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     }
 }
 
-/// Create a Parser from a lambda which takes in a &[ParserContext] and returns a [ParserResult].
+/// Create a Parser from a lambda which takes in a &[`ParserContext`] and returns a [`ParserResult`].
 pub fn parser<'p, C, T, E>(
     f: impl Fn(&'p ParserContext<'p, C>) -> ParserResult<T, E> + 'p,
 ) -> impl Parser<'p, C, T, E> + 'p

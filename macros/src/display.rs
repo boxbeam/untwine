@@ -25,14 +25,14 @@ impl ToString for PatternList {
     fn to_string(&self) -> String {
         match self {
             PatternList::List(list) => {
-                let list: Vec<String> = list.iter().map(|p| p.to_string()).collect();
+                let list: Vec<String> = list.iter().map(Pattern::to_string).collect();
                 list.join(" ")
             }
             PatternList::Choices(choices) => {
                 let choices_joined: Vec<String> = choices
                     .iter()
                     .map(|list| {
-                        let list: Vec<String> = list.iter().map(|p| p.to_string()).collect();
+                        let list: Vec<String> = list.iter().map(Pattern::to_string).collect();
                         list.join(" ")
                     })
                     .collect();

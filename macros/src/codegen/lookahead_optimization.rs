@@ -110,11 +110,10 @@ pub fn build_lookahead_map(parsers: &ParserBlock) -> HashMap<String, Vec<NextCha
     parsers
         .parsers
         .iter()
-        .map(|p| {
-            let patterns: Vec<&Pattern> = p.patterns.patterns.iter().map(|p| &p.pattern).collect();
+        .map(|parser| {
             (
-                p.name.to_string(),
-                get_patterns_lookahead(patterns.into_iter()),
+                parser.name.to_string(),
+                get_patterns_lookahead(parser.patterns.patterns.iter().map(|p| &p.pattern)),
             )
         })
         .collect()

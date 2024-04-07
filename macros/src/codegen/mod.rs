@@ -369,7 +369,7 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
             let name = parser.name;
             exports.push(quote! {
                 #vis use #parser_name::#name;
-            })
+            });
         }
     }
 

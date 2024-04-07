@@ -31,7 +31,7 @@ mod tests {
     pub fn test_num_list() {
         assert_eq!(untwine::parse(num_list, "1,2,3").unwrap(), vec![1, 2, 3]);
         assert_snapshot!(
-            untwine::parse_pretty(num_list, "1,2,", PrettyOptions::none()).unwrap_err()
+            untwine::parse_pretty(num_list, "1,2,", PrettyOptions::no_color()).unwrap_err()
         );
     }
 
@@ -40,13 +40,15 @@ mod tests {
         assert_eq!(untwine::parse(expr, "1+2*3").unwrap(), 7.0);
         assert_eq!(untwine::parse(expr, "1+(3/4)").unwrap(), 1.75);
         assert_eq!(untwine::parse(expr, "4--1").unwrap(), 5.0);
-        assert_snapshot!(untwine::parse_pretty(expr, "1.", PrettyOptions::none()).unwrap_err());
+        assert_snapshot!(untwine::parse_pretty(expr, "1.", PrettyOptions::no_color()).unwrap_err());
         assert_snapshot!(
-            untwine::parse_pretty(expr, "(1\n\n+", PrettyOptions::none()).unwrap_err()
+            untwine::parse_pretty(expr, "(1\n\n+", PrettyOptions::no_color()).unwrap_err()
         );
         assert_snapshot!(
-            untwine::parse_pretty(expr, "(1\n\n+5", PrettyOptions::none()).unwrap_err()
+            untwine::parse_pretty(expr, "(1\n\n+5", PrettyOptions::no_color()).unwrap_err()
         );
-        assert_snapshot!(untwine::parse_pretty(expr, "--1", PrettyOptions::none()).unwrap_err());
+        assert_snapshot!(
+            untwine::parse_pretty(expr, "--1", PrettyOptions::no_color()).unwrap_err()
+        );
     }
 }

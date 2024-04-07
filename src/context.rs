@@ -36,7 +36,7 @@ impl<'p, C> ParserContext<'p, C> {
         col(&self.input[..self.cursor()])
     }
 
-    /// Create a [ParserResult] using the position of the parsing head.
+    /// Create a [`ParserResult`] using the position of the parsing head.
     pub fn result<T, E>(&self, success: Option<T>, error: Option<E>) -> ParserResult<T, E> {
         ParserResult::new(success, error, self.cursor()..self.cursor())
     }

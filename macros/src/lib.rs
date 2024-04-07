@@ -76,7 +76,7 @@ impl Parse for Header {
                     HeaderParam::ErrorType(typ) => error_type = typ,
                     HeaderParam::DataType(typ) => data_type = typ,
                     HeaderParam::LookaheadOptimization(enable) => {
-                        lookahead_optimization = enable.value()
+                        lookahead_optimization = enable.value();
                     }
                 }
                 if !content.is_empty() {
