@@ -8,7 +8,7 @@ use syn::{
     parse::{discouraged::Speculative, Parse, ParseStream},
     parse_macro_input,
     token::{Brace, Bracket, Paren},
-    Block, Expr, Ident, LitChar, LitStr, Path, Result, Token, Type, Visibility,
+    Block, Expr, Ident, LitBool, LitChar, LitStr, Path, Result, Token, Type, Visibility,
 };
 
 mod codegen;
@@ -21,6 +21,7 @@ mod kw {
     custom_keyword!(error);
     custom_keyword!(context);
     custom_keyword!(data);
+    custom_keyword!(lookahead_optimization);
 }
 
 #[derive(Debug)]
@@ -28,6 +29,7 @@ pub(crate) struct Header {
     ctx_name: Ident,
     error_type: Type,
     data_type: Type,
+    lookahead_optimization: bool,
 }
 
 #[derive(Debug)]
@@ -35,6 +37,7 @@ pub(crate) enum HeaderParam {
     ContextName(Ident),
     ErrorType(Type),
     DataType(Type),
+    LookaheadOptimization(LitBool),
 }
 
 impl Parse for HeaderParam {
@@ -48,6 +51,9 @@ impl Parse for HeaderParam {
         } else if input.parse::<kw::data>().is_ok() {
             input.parse::<Token![=]>()?;
             Ok(HeaderParam::DataType(input.parse()?))
+        } else if input.parse::<kw::lookahead_optimization>().is_ok() {
+            input.parse::<Token![=]>()?;
+            Ok(HeaderParam::LookaheadOptimization(input.parse()?))
         } else {
             Err(input.error("expected parameter name 'error' or 'context'"))
         }
@@ -59,6 +65,7 @@ impl Parse for Header {
         let mut ctx_name = Ident::new("__ctx", Span::call_site());
         let mut error_type = syn::parse(quote! {untwine::ParserError}.into())?;
         let mut data_type = syn::parse(quote! {()}.into())?;
+        let mut lookahead_optimization = true;
         if input.peek(Bracket) {
             let content;
             bracketed!(content in input);
@@ -68,6 +75,9 @@ impl Parse for Header {
                     HeaderParam::ContextName(name) => ctx_name = name,
                     HeaderParam::ErrorType(typ) => error_type = typ,
                     HeaderParam::DataType(typ) => data_type = typ,
+                    HeaderParam::LookaheadOptimization(enable) => {
+                        lookahead_optimization = enable.value()
+                    }
                 }
                 if !content.is_empty() {
                     content.parse::<Token![,]>()?;
@@ -78,6 +88,7 @@ impl Parse for Header {
             ctx_name,
             error_type,
             data_type,
+            lookahead_optimization,
         })
     }
 }

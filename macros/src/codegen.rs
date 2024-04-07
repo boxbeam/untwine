@@ -9,9 +9,9 @@ use syn::{Result, Type, Visibility};
 
 use crate::{Modifier, ParserBlock, ParserDef, Pattern, PatternFragment, PatternList};
 
-use self::opts::{build_lookahead_map, generate_lookahead_table, NextChar};
+use self::lookahead_optimization::{build_lookahead_map, generate_lookahead_table, NextChar};
 
-mod opts;
+mod lookahead_optimization;
 
 pub fn option_of(typ: &Type) -> Type {
     if is_unit(typ) {
@@ -44,6 +44,7 @@ struct CodegenState {
     parser_name: String,
     parser_types: HashMap<String, Type>,
     parser_lookaheads: HashMap<String, Vec<NextChar>>,
+    lookahead_optimization: bool,
 }
 
 fn parse_fragment(
@@ -160,7 +161,13 @@ fn parse_pattern_list(
 ) -> Result<TokenStream> {
     match patterns {
         PatternList::List(list) => parse_patterns(list, state, capture),
-        PatternList::Choices(choices) => generate_lookahead_table(choices, state, capture),
+        PatternList::Choices(choices) => {
+            if state.lookahead_optimization {
+                generate_lookahead_table(choices, state, capture)
+            } else {
+                parse_pattern_choices(choices, state, capture)
+            }
+        }
     }
 }
 
@@ -343,6 +350,7 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
         parser_context_name: block.header.ctx_name,
         error_type: block.header.error_type,
         data_type: block.header.data_type,
+        lookahead_optimization: block.header.lookahead_optimization,
         parser_name: Default::default(),
         parser_types,
         parser_lookaheads: lookaheads,
