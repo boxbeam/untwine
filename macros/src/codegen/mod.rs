@@ -176,6 +176,9 @@ fn parse_pattern_choices(
     state: &CodegenState,
     capture: bool,
 ) -> Result<TokenStream> {
+    if patterns.len() == 1 {
+        return parse_patterns(&patterns[0], state, capture);
+    }
     let data = &state.data_type;
     let err = &state.error_type;
     let ctx = &state.parser_context_name;
