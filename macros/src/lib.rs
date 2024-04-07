@@ -542,6 +542,7 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 /// - `error = MyErrorType` - Use `MyErrorType` instead of `ParserError` as the error type for all parsers. `MyErrorType` must implement `From<ParserError>`.
 /// - `context = ctx_name` - Expose the `ParserContext` to the parser function bodies using the name specified.
 /// - `data_type = MyCustomContext` - Specify a custom context type which will be passed to all parser functions. It can be accessed using `.data()` or `.data_mut()` on the context argument.
+/// - `lookahead_optimization = false` - Disable the lookahead optimization, which is on by default. This optimization can improve parser performance by around 30%, but also inflates the size of the generated code, which may cause slower clean builds.
 ///
 /// ## Using a parser
 /// Every parser specified is rewritten into a regular Rust function, which will parse all of the patterns specified and evaluate your block at the end.

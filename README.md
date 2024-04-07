@@ -73,7 +73,7 @@ and [examples/expr.rs](https://github.com/boxbeam/untwine/blob/master/examples/j
 ## Performance and goals
 
 While Untwine currently has no formal benchmarks, informally I have found parsers written using Untwine to be about
-three times slower than a basic but well-optimized handwritten parser. While Untwine seeks to offer high performance,
+half as fast as a basic but well-optimized handwritten parser. While Untwine seeks to offer high performance,
 it is not suitable for highly performance-critical parsers.
 
 Most parsing is not so performance-critical, and Untwine is ideal for building programming languages or DSLs,
