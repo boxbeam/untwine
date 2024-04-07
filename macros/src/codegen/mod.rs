@@ -347,7 +347,11 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
     parser_name.hash(&mut hasher);
     let hash = hasher.finish();
     let parser_name = Ident::new(&format!("__parser_{hash}"), Span::call_site());
-    let lookaheads = build_lookahead_map(&block);
+    let lookaheads = if block.header.lookahead_optimization {
+        build_lookahead_map(&block)
+    } else {
+        HashMap::new()
+    };
 
     let mut state = CodegenState {
         parser_context_name: block.header.ctx_name,

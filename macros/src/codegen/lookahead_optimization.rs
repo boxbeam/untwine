@@ -179,9 +179,6 @@ fn get_pattern_list_lookahead(list: &PatternList) -> Vec<NextChar> {
 fn get_patterns_lookahead<'a>(
     patterns: impl ExactSizeIterator<Item = &'a Pattern>,
 ) -> Vec<NextChar> {
-    if patterns.len() == 0 {
-        return vec![NextChar::Any];
-    }
     let mut next = vec![];
     let mut all_optional = true;
     for pattern in patterns {
