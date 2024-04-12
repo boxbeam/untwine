@@ -289,6 +289,7 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
             .map(|ident| quote! {let #ident =})
             .unwrap_or_default();
         let parser = parse_pattern(&pattern.pattern, state, pattern.label.is_some())?;
+
         parsers.push(quote! {
             #prefix {
                 let mut res = #parser.parse(#ctx);
@@ -299,7 +300,9 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
                     },
                     None => {
                         #ctx.reset(__start);
-                        return ParserResult::new(None, res.error, res.pos).integrate_error(__res).set_start_if_empty(__start);
+                        return ParserResult::new(None, res.error, res.pos)
+                            .integrate_error(__res)
+                            .set_start_if_empty(__start);
                     },
                 }
             };
@@ -324,7 +327,10 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
             let res = (move || -> Result<#typ, #err> { Ok(#block) })();
             match res {
                 Ok(val) => #ctx.result(Some(val), None).integrate_error(__res),
-                Err(err) => ParserResult::new(None, Some(err), __res.pos),
+                Err(err) => {
+                    #ctx.reset(__start);
+                    ParserResult::new(None, Some(err), __res.pos)
+                },
             }
         }
     })

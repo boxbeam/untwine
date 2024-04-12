@@ -94,7 +94,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
             let mut res = self.parse(ctx);
 
             let Some(elem) = res.success.take() else {
-                return ParserResult::new(Some(elems), res.error, res.pos);
+                return ParserResult::new(None, res.error, res.pos);
             };
             elems.push(elem);
 
