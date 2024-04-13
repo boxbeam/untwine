@@ -1,13 +1,14 @@
 [workspace]
 members = ["macros", "tests"] 
+package.version = "0.5.1"
 
 [workspace.dependencies]
 thiserror = {version = "1.0.58"}
-macros = { package = "untwine_macros", path = "macros", version = "0.5.1" }
+macros = { package = "untwine_macros", path = "macros" }
 
 [package]
 name = "untwine"
-version = "0.5.1"
+version.workspace = true
 edition = "2021"
 description = "Declarative parsing with a BNF-like syntax"
 repository = "https://github.com/boxbeam/untwine"
