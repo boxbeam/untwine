@@ -29,6 +29,7 @@ pub mod error;
 pub use error::ParserError;
 pub use macros::parser;
 pub mod attr;
+pub mod collect;
 pub mod context;
 pub mod parser;
 pub mod parsers;

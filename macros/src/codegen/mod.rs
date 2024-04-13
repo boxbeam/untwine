@@ -135,15 +135,23 @@ fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Resu
         Some(Modifier::Optional) => {
             quote! {#fragment_parser.optional()}
         }
-        Some(Modifier::Repeating) => quote! {#fragment_parser.repeating()},
-        Some(Modifier::OptionalRepeating) => quote! {#fragment_parser.optional_repeating()},
-        Some(Modifier::Delimited(delimiter)) => {
-            let delimiter_parser = parse_fragment(delimiter, state, false)?;
-            quote! {#fragment_parser.delimited(#delimiter_parser)}
+        Some(Modifier::Repeating(typ)) => {
+            let typ = &typ.typ;
+            quote! {#fragment_parser.repeating::<#typ>()}
         }
-        Some(Modifier::OptionalDelimited(delimiter)) => {
+        Some(Modifier::OptionalRepeating(typ)) => {
+            let typ = &typ.typ;
+            quote! {#fragment_parser.optional_repeating::<#typ>()}
+        }
+        Some(Modifier::Delimited(delimiter, typ)) => {
             let delimiter_parser = parse_fragment(delimiter, state, false)?;
-            quote! {#fragment_parser.optional_delimited(#delimiter_parser)}
+            let typ = &typ.typ;
+            quote! {#fragment_parser.delimited::<#typ, _>(#delimiter_parser)}
+        }
+        Some(Modifier::OptionalDelimited(delimiter, typ)) => {
+            let delimiter_parser = parse_fragment(delimiter, state, false)?;
+            let typ = &typ.typ;
+            quote! {#fragment_parser.optional_delimited::<#typ, _>(#delimiter_parser)}
         }
         None => fragment_parser,
     };
@@ -446,10 +454,10 @@ pub fn pattern_type(pattern: &Pattern, parser_types: &HashMap<String, Type>) -> 
     let typ = match pattern.modifier {
         Some(Modifier::Optional) => option_of(&typ),
         Some(
-            Modifier::Repeating
-            | Modifier::OptionalRepeating
-            | Modifier::Delimited(_)
-            | Modifier::OptionalDelimited(_),
+            Modifier::Repeating(_)
+            | Modifier::OptionalRepeating(_)
+            | Modifier::Delimited(_, _)
+            | Modifier::OptionalDelimited(_, _),
         ) => vec_of(&typ),
         None => typ,
     };

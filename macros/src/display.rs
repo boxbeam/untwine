@@ -7,13 +7,13 @@ impl ToString for Pattern {
         match &self.modifier {
             None => fragment,
             Some(Modifier::Optional) => format!("{fragment}?"),
-            Some(Modifier::Repeating) => format!("{fragment}+"),
-            Some(Modifier::OptionalRepeating) => format!("{fragment}*"),
-            Some(Modifier::Delimited(delim)) => {
+            Some(Modifier::Repeating(_)) => format!("{fragment}+"),
+            Some(Modifier::OptionalRepeating(_)) => format!("{fragment}*"),
+            Some(Modifier::Delimited(delim, _)) => {
                 let delim = delim.to_string();
                 format!("{fragment}${delim}+")
             }
-            Some(Modifier::OptionalDelimited(delim)) => {
+            Some(Modifier::OptionalDelimited(delim, _)) => {
                 let delim = delim.to_string();
                 format!("{fragment}${delim}*")
             }

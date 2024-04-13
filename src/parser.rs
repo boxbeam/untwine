@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::{context::ParserContext, result::ParserResult};
+use crate::{collect::Collect, context::ParserContext, result::ParserResult};
 
 /// The fundamental parsing construct for untwine. A simple parser which comes with combinators
 /// for modifying its behavior.
@@ -42,61 +42,64 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     }
 
     /// Try to parse as many times as possible in sequence, requiring at least one match.
-    fn repeating(self) -> impl Parser<'p, C, Vec<T>, E>
+    fn repeating<O>(self) -> impl Parser<'p, C, O, E>
     where
         Self: Sized + 'p,
+        O: Collect<T> + 'p,
     {
         parser(move |ctx| {
-            let mut elems = vec![];
+            let mut elems = O::default();
             let res = self.parse(ctx);
             let Some(elem) = res.success else {
                 return ParserResult::new(None, res.error, res.pos);
             };
-            elems.push(elem);
+            elems.add(elem);
 
             let failed = loop {
                 let res = self.parse(ctx);
                 let Some(elem) = res.success else {
                     break res;
                 };
-                elems.push(elem);
+                elems.add(elem);
             };
             ParserResult::new(Some(elems), failed.error, failed.pos)
         })
     }
 
     /// Try to parse as many times as possible in sequence, allowing zero matches.
-    fn optional_repeating(self) -> impl Parser<'p, C, Vec<T>, E>
+    fn optional_repeating<O: Collect<T>>(self) -> impl Parser<'p, C, O, E>
     where
         Self: Sized + 'p,
+        O: Collect<T> + 'p,
     {
         parser(move |ctx| {
-            let mut elems = vec![];
+            let mut elems = O::default();
             let failed = loop {
                 let res = self.parse(ctx);
                 let Some(elem) = res.success else {
                     break res;
                 };
-                elems.push(elem);
+                elems.add(elem);
             };
             ParserResult::new(Some(elems), failed.error, failed.pos)
         })
     }
 
     /// Parse a list using this parser, separated by another delimiter parser. Discards delimiters, and requires at least one match.
-    fn delimited<D>(self, delim: impl Parser<'p, C, D, E> + 'p) -> impl Parser<'p, C, Vec<T>, E>
+    fn delimited<O, D>(self, delim: impl Parser<'p, C, D, E> + 'p) -> impl Parser<'p, C, O, E>
     where
         Self: Sized + 'p,
+        O: Collect<T> + 'p,
         D: 'p,
     {
         parser(move |ctx| {
-            let mut elems = vec![];
+            let mut elems = O::default();
             let mut res = self.parse(ctx);
 
             let Some(elem) = res.success.take() else {
                 return ParserResult::new(None, res.error, res.pos);
             };
-            elems.push(elem);
+            elems.add(elem);
 
             let mut last_res = res;
             let mut delim_start = ctx.cursor();
@@ -108,7 +111,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
                         .set_start_if_empty(delim_start);
                 };
                 last_res = res;
-                elems.push(elem);
+                elems.add(elem);
                 delim_start = ctx.cursor();
             }
             ParserResult::new(Some(elems), last_res.error, last_res.pos)
@@ -116,22 +119,23 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     }
 
     /// Parse a list using this parser, separated by another delimiter parser. Discards delimiters, and allows zero matches.
-    fn optional_delimited<D>(
+    fn optional_delimited<O, D>(
         self,
         delim: impl Parser<'p, C, D, E> + 'p,
-    ) -> impl Parser<'p, C, Vec<T>, E>
+    ) -> impl Parser<'p, C, O, E>
     where
         Self: Sized + 'p,
+        O: Collect<T> + 'p,
         D: 'p,
     {
         parser(move |ctx| {
-            let mut elems = vec![];
+            let mut elems = O::default();
 
             let mut res = self.parse(ctx);
             let Some(elem) = res.success.take() else {
                 return ParserResult::new(Some(elems), res.error, res.pos);
             };
-            elems.push(elem);
+            elems.add(elem);
 
             let mut last_res = res;
             let mut delim_start = ctx.cursor();
@@ -143,7 +147,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
                         .set_start_if_empty(delim_start);
                 };
                 last_res = res;
-                elems.push(elem);
+                elems.add(elem);
                 delim_start = ctx.cursor();
             }
             ParserResult::new(Some(elems), last_res.error, last_res.pos)

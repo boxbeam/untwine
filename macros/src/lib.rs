@@ -408,23 +408,42 @@ impl Parse for PatternList {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct RepeatingType {
+    typ: Type,
+}
+
+impl Parse for RepeatingType {
+    fn parse(input: ParseStream) -> Result<Self> {
+        if input.parse::<Token![::]>().is_ok() {
+            input.parse::<Token![<]>()?;
+            let typ = input.parse()?;
+            input.parse::<Token![>]>()?;
+            return Ok(RepeatingType { typ });
+        }
+        Ok(RepeatingType {
+            typ: syn::parse(quote! {Vec<_>}.into())?,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum Modifier {
     Optional,
-    Repeating,
-    OptionalRepeating,
-    Delimited(PatternFragment),
-    OptionalDelimited(PatternFragment),
+    Repeating(RepeatingType),
+    OptionalRepeating(RepeatingType),
+    Delimited(PatternFragment, RepeatingType),
+    OptionalDelimited(PatternFragment, RepeatingType),
 }
 
 impl Modifier {
     fn is_repeating(&self) -> bool {
         match self {
             Modifier::Optional => false,
-            Modifier::Repeating => true,
-            Modifier::OptionalRepeating => true,
-            Modifier::Delimited(_) => true,
-            Modifier::OptionalDelimited(_) => true,
+            Modifier::Repeating(_) => true,
+            Modifier::OptionalRepeating(_) => true,
+            Modifier::Delimited(_, _) => true,
+            Modifier::OptionalDelimited(_, _) => true,
         }
     }
 }
@@ -432,19 +451,19 @@ impl Modifier {
 impl Parse for Modifier {
     fn parse(input: ParseStream) -> Result<Self> {
         if input.parse::<Option<Token![+]>>()?.is_some() {
-            Ok(Modifier::Repeating)
+            Ok(Modifier::Repeating(input.parse()?))
         } else if input.parse::<Option<Token![?]>>()?.is_some() {
             Ok(Modifier::Optional)
         } else if input.parse::<Option<Token![*]>>()?.is_some() {
-            Ok(Modifier::OptionalRepeating)
+            Ok(Modifier::OptionalRepeating(input.parse()?))
         } else if input.parse::<Option<Token![$]>>()?.is_some() {
             let fragment = input.parse()?;
             if input.peek(Token![+]) {
                 input.parse::<Token![+]>()?;
-                Ok(Modifier::Delimited(fragment))
+                Ok(Modifier::Delimited(fragment, input.parse()?))
             } else {
                 input.parse::<Token![*]>()?;
-                Ok(Modifier::OptionalDelimited(fragment))
+                Ok(Modifier::OptionalDelimited(fragment, input.parse()?))
             }
         } else {
             Err(input.error("expected modifier"))

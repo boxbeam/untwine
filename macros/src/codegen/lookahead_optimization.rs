@@ -123,7 +123,9 @@ fn get_pattern_lookahead(pattern: &Pattern) -> Vec<NextChar> {
     let mut lookaheads = get_fragment_lookahead(&pattern.fragment);
     if matches!(
         pattern.modifier,
-        Some(Modifier::Optional | Modifier::OptionalRepeating | Modifier::OptionalDelimited(_))
+        Some(
+            Modifier::Optional | Modifier::OptionalRepeating(_) | Modifier::OptionalDelimited(_, _)
+        )
     ) && !lookaheads.contains(&NextChar::Any)
     {
         lookaheads.push(NextChar::Any);
