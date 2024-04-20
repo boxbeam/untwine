@@ -45,6 +45,9 @@ where
     parser.ignore_err()
 }
 
+/// When the wrapped pattern fails to parse, try to jump ahead to a specific literal,
+/// but do not consume it. This allows you to specify an "anchor" from which parsing
+/// can continue.
 pub fn recover_to<'p, C, T, E>(
     parser: impl Parser<'p, C, T, E> + 'p,
     meta: PatternMeta,
@@ -58,6 +61,9 @@ where
     parser.recover_to::<_, false>(literal(anchor, meta.parser_name), 150)
 }
 
+/// When the wrapped pattern fails to parse, try to jump ahead to one of several
+/// specific literals, but do not consume it. This allows you to specify "anchors"
+/// from which parsing can continue.
 pub fn recover_to_any<'p, C, T, E, const N: usize>(
     input: impl Parser<'p, C, T, E> + 'p,
     _meta: PatternMeta,
@@ -70,7 +76,6 @@ where
 {
     input.recover_to::<_, false>(
         parser(move |ctx| {
-            println!("HI");
             ParserResult::new(
                 anchor
                     .iter()
