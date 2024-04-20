@@ -1,6 +1,8 @@
 # Untwine
 
-![Example expression errors](./screenshots/expr-1.png)
+The prettier pattern-matching parser with automatic error recovery
+
+![Example expression errors](./screenshots/json-3.png)
 
 Untwine is a declarative parsing library which allows a style of parsing which is similar to direct pattern matching using a custom macro syntax.
 This allows the creation of extremely compact parsers with decent performance characteristics and high-quality error messages.

@@ -55,7 +55,7 @@ where
     C: 'p,
     T: Recoverable + 'p,
 {
-    parser.recover_to::<_, false>(literal(anchor, meta.parser_name), 30)
+    parser.recover_to::<_, false>(literal(anchor, meta.parser_name), 150)
 }
 
 pub fn recover_to_any<'p, C, T, E, const N: usize>(
@@ -80,6 +80,6 @@ where
                 ctx.cursor()..ctx.cursor(),
             )
         }),
-        30,
+        150,
     )
 }

@@ -93,7 +93,7 @@ fn parse_fragment(
                 .wrapped_parsers
                 .get(&parser.to_string())
                 .filter(|_| state.recover)
-                .map(|(open, close)| quote! { .recover_wrapped(#open, #close, 150) });
+                .map(|(open, close)| quote! { .recover_wrapped(#open, #close, 1000) });
 
             quote! {
                 untwine::parser::parser::<#data, _, #err>(|ctx| #parser(ctx)) #recovery
@@ -149,14 +149,14 @@ fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Resu
             let delimiter_parser = parse_fragment(delimiter, state, false)?;
             let recovery = state
                 .recover
-                .then(|| quote! { .recover_to::<_, false>(#delimiter_parser, 30) });
+                .then(|| quote! { .recover_to::<_, false>(#delimiter_parser, 150) });
             quote! {#fragment_parser #recovery .delimited::<_, true>(#delimiter_parser)}
         }
         Some(Modifier::OptionalDelimited(delimiter)) => {
             let delimiter_parser = parse_fragment(delimiter, state, false)?;
             let recovery = state
                 .recover
-                .then(|| quote! { .recover_to::<_, false>(#delimiter_parser, 30) });
+                .then(|| quote! { .recover_to::<_, false>(#delimiter_parser, 150) });
             quote! {#fragment_parser #recovery .delimited::<_, false>(#delimiter_parser)}
         }
         None => fragment_parser,

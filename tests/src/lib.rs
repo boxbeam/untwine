@@ -128,5 +128,9 @@ mod tests {
             PrettyOptions::no_color()
         )
         .unwrap_err());
+
+        assert_snapshot!(
+            untwine::parse_pretty(json_value, r#"[[],"#, PrettyOptions::no_color()).unwrap_err()
+        );
     }
 }

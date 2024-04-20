@@ -15,6 +15,7 @@ pub enum RecoverySignal<E> {
 pub struct ParserContext<'p, C, E> {
     cur: Cell<usize>,
     data: RefCell<C>,
+    pub(crate) recover_terminator: Cell<Option<&'static str>>,
     pub recovered: AppendCell<(Range<usize>, E)>,
     pub input: &'p str,
 }
@@ -26,6 +27,7 @@ impl<'p, C, E> ParserContext<'p, C, E> {
             data: RefCell::new(data),
             recovered: Default::default(),
             input,
+            recover_terminator: None.into(),
         }
     }
 

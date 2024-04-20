@@ -1,6 +1,6 @@
 use std::{cell::UnsafeCell, marker::PhantomData};
 
-use crate::{context::ParserContext, result::ParserResult, Recoverable};
+use crate::{context::ParserContext, result::ParserResult, ParserError, Recoverable};
 
 pub struct AppendCell<T> {
     inner: UnsafeCell<Vec<T>>,
@@ -229,7 +229,12 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
 
             let mut distance = 0;
             ctx.advance(res.pos.end - ctx.cursor());
-            while distance < max_distance {
+            while distance < max_distance
+                && !ctx
+                    .recover_terminator
+                    .get()
+                    .is_some_and(|terminator| ctx.slice().starts_with(terminator))
+            {
                 let cursor_before = ctx.cursor();
 
                 if anchor.parse(ctx).success.is_some() {
@@ -273,16 +278,21 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     ) -> impl Parser<'p, C, T, E>
     where
         Self: Sized + 'p,
-        T: Recoverable,
+        T: Recoverable + std::fmt::Debug,
+        E: From<ParserError> + std::fmt::Debug,
     {
         parser(move |ctx| {
             let start = ctx.cursor();
+            let parent_terminator = ctx.recover_terminator.get();
+            ctx.recover_terminator.set(Some(close));
             let res = self.parse(ctx);
-            if res.success.is_some() || res.pos.end - ctx.cursor() < open.len() {
+            if res.success.is_some() || res.pos.end - ctx.cursor() <= open.len() {
+                ctx.recover_terminator.set(parent_terminator);
                 return res;
             }
 
-            let mut depth = 0;
+            ctx.reset(res.pos.end.max(ctx.last_recovered_end()));
+            let mut depth = 1;
             let mut distance = 0;
             while let Some(c) = ctx.slice().chars().next() {
                 if ctx.slice().starts_with(open) {
@@ -296,6 +306,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
                         if let Some(err) = res.error {
                             ctx.add_recovered_error(err, res.pos.clone());
                         }
+                        ctx.recover_terminator.set(parent_terminator);
                         return ParserResult::new(
                             Some(Recoverable::error_value(start..ctx.cursor())),
                             None,
@@ -314,6 +325,9 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
             }
 
             ctx.reset(start);
+            if res.pos.start != start {
+                ctx.add_recovered_error(ParserError::UnmatchedDelimiter(open).into(), start..start);
+            }
             res
         })
     }
