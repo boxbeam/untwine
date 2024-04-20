@@ -534,7 +534,7 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 /// Those which have a visibility modifier like `pub` or `pub(crate)` will be accessible outside of the parser block.
 ///
 /// To use one of these parsers, you can either construct a `ParserContext` and call it as normal, or use `untwine::parse` / `untwine::parse_pretty` to get
-/// a regular [Result] instead of untwine's `ParserResult` type.
+/// a regular `Result` instead of untwine's `ParserResult` type.
 
 /// ## Special syntax for parsers
 /// There is an alternate syntax for parsers whose output needs no modification.
@@ -571,7 +571,7 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 /// manually using attributes.
 ///
 /// In order for error recovery to work, you will need to implement the `Recoverable` trait on types which can be recovered from.
-/// This is like [Default], but can take a range where the error occurred, and is used to generate a value which should be returned
+/// This is like `Default`, but can take a range where the error occurred, and is used to generate a value which should be returned
 /// in case of an error which was recovered from.
 ///
 /// You can use `#[derive(Recoverable)]` to automatically derive the `Recoverable` trait on your types. If using a struct, all fields
