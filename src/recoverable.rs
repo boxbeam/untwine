@@ -1,6 +1,8 @@
 use std::{collections::HashMap, ops::Range};
 
+/// A type which can be recovered from when parsing, by generating a default error value.
 pub trait Recoverable {
+    /// Create an error value using the span of the error.
     fn error_value(pos: Range<usize>) -> Self;
 }
 
