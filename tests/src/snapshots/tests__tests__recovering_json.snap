@@ -1,0 +1,13 @@
+---
+source: tests/src/lib.rs
+expression: "untwine::parse_pretty(json_value, r#\"{\"a\" true, \"b\" fals}\"#,\n        PrettyOptions::no_color()).unwrap_err()"
+---
+1 | {"a" true, "b" fals}
+     ----^
+[1:5] Expected ':' while parsing map entry
+
+==========
+
+1 | {"a" true, "b" fals}
+               ----^
+[1:15] Expected ':' while parsing map entry

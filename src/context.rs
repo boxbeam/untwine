@@ -1,22 +1,30 @@
 use std::{
     cell::{Cell, RefCell},
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, Range},
 };
 
-use crate::result::ParserResult;
+use crate::{result::ParserResult, AppendCell};
+
+#[derive(Debug)]
+pub enum RecoverySignal<E> {
+    Reset(usize),
+    Error(Range<usize>, E),
+}
 
 /// The input for all parsers. Stores the initial [&str] input and an index for the parsing head.
-pub struct ParserContext<'p, C> {
+pub struct ParserContext<'p, C, E> {
     cur: Cell<usize>,
     data: RefCell<C>,
+    pub recovered: AppendCell<(Range<usize>, E)>,
     pub input: &'p str,
 }
 
-impl<'p, C> ParserContext<'p, C> {
+impl<'p, C, E> ParserContext<'p, C, E> {
     pub fn new(input: &'p str, data: C) -> Self {
         ParserContext {
-            cur: Default::default(),
+            cur: 0.into(),
             data: RefCell::new(data),
+            recovered: Default::default(),
             input,
         }
     }
@@ -37,7 +45,7 @@ impl<'p, C> ParserContext<'p, C> {
     }
 
     /// Create a [`ParserResult`] using the position of the parsing head.
-    pub fn result<T, E>(&self, success: Option<T>, error: Option<E>) -> ParserResult<T, E> {
+    pub fn result<T>(&self, success: Option<T>, error: Option<E>) -> ParserResult<T, E> {
         ParserResult::new(success, error, self.cursor()..self.cursor())
     }
 
@@ -64,6 +72,36 @@ impl<'p, C> ParserContext<'p, C> {
     /// Get a mutable reference to the inner custom context.
     pub fn data_mut(&self) -> impl DerefMut<Target = C> + '_ {
         self.data.borrow_mut()
+    }
+
+    /// Add a recovered error.
+    pub fn add_recovered_error(&self, error: E, error_range: Range<usize>) {
+        self.recovered.append((error_range, error));
+    }
+
+    /// Take the errors which were recovered from while parsing.
+    pub fn take_recovered_errors(&mut self) -> Vec<(Range<usize>, E)> {
+        std::mem::take(&mut self.recovered).into_inner()
+    }
+
+    /// Get the number of errors which have been recovered from this parser.
+    /// This is meant for internal use only, but has to be exposed since it is used by macros.
+    pub fn recovered_count(&self) -> usize {
+        self.recovered.len()
+    }
+
+    /// Remove all recovered errors after a given number.
+    /// This is meant for internal use only, but has to be exposed since it is used by macros.
+    pub fn truncate_recovered(&self, len: usize) -> Vec<(Range<usize>, E)> {
+        self.recovered.truncate(len)
+    }
+
+    /// Get the ending position of the last recovered error, falling back to the current position
+    /// if no errors have been recovered.
+    pub fn last_recovered_end(&self) -> usize {
+        self.recovered
+            .inspect_last(|(pos, _err)| pos.end)
+            .unwrap_or(self.cursor())
     }
 }
 

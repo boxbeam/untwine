@@ -1,6 +1,6 @@
 ---
 source: tests/src/lib.rs
-expression: "untwine::parse_pretty(expr, \"(1\\n\\n+5\", false).unwrap_err()"
+expression: "untwine::parse_pretty(expr, \"(1\\n\\n+5\",\n        PrettyOptions::no_color()).unwrap_err()"
 ---
     | beginning here
     v
@@ -8,4 +8,4 @@ expression: "untwine::parse_pretty(expr, \"(1\\n\\n+5\", false).unwrap_err()"
   | ...
 3 | +5
     --^
-[3:2] Expected literal ')'
+[3:2] Expected ')' while parsing term

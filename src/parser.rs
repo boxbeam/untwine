@@ -1,12 +1,56 @@
-use std::marker::PhantomData;
+use std::{cell::UnsafeCell, marker::PhantomData};
 
-use crate::{context::ParserContext, result::ParserResult};
+use crate::{context::ParserContext, result::ParserResult, Recoverable};
+
+pub struct AppendCell<T> {
+    inner: UnsafeCell<Vec<T>>,
+}
+
+impl<T> Default for AppendCell<T> {
+    fn default() -> Self {
+        Self {
+            inner: UnsafeCell::new(vec![]),
+        }
+    }
+}
+
+impl<T> AppendCell<T> {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn append(&self, item: T) {
+        unsafe { (*self.inner.get()).push(item) }
+    }
+
+    pub fn extend(&self, items: impl IntoIterator<Item = T>) {
+        unsafe { (*self.inner.get()).extend(items) }
+    }
+
+    pub fn into_inner(self) -> Vec<T> {
+        let val = unsafe { std::ptr::read(self.inner.get()) };
+        std::mem::forget(self);
+        val
+    }
+
+    pub fn len(&self) -> usize {
+        unsafe { (*self.inner.get()).len() }
+    }
+
+    pub fn truncate(&self, len: usize) -> Vec<T> {
+        unsafe { (*self.inner.get()).drain(len..).collect() }
+    }
+
+    pub fn inspect_last<V: 'static>(&self, f: impl FnOnce(&T) -> V) -> Option<V> {
+        unsafe { (*self.inner.get()).last().map(f) }
+    }
+}
 
 /// The fundamental parsing construct for untwine. A simple parser which comes with combinators
 /// for modifying its behavior.
 pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     /// Parse a value from the [`ParserContext`]. On fail, the context will be reset to the starting position.
-    fn parse(&self, ctx: &'p ParserContext<'p, C>) -> ParserResult<T, E>;
+    fn parse(&self, ctx: &'p ParserContext<'p, C, E>) -> ParserResult<T, E>;
 
     /// Map the output value using a mapping function.
     fn map<V: 'p>(self, f: impl Fn(T) -> V + 'p) -> impl Parser<'p, C, V, E> + 'p
@@ -48,20 +92,21 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     {
         parser(move |ctx| {
             let mut elems = vec![];
-            let res = self.parse(ctx);
-            let Some(elem) = res.success else {
-                return ParserResult::new(None, res.error, res.pos);
+            let mut last_res = self.parse(ctx);
+            let Some(elem) = last_res.success.take() else {
+                return ParserResult::new(None, last_res.error, last_res.pos);
             };
             elems.push(elem);
 
-            let failed = loop {
+            loop {
                 let res = self.parse(ctx);
                 let Some(elem) = res.success else {
-                    break res;
+                    last_res = res.integrate_error(last_res);
+                    break;
                 };
                 elems.push(elem);
-            };
-            ParserResult::new(Some(elems), failed.error, failed.pos)
+            }
+            ParserResult::new(Some(elems), last_res.error, last_res.pos)
         })
     }
 
@@ -72,51 +117,27 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     {
         parser(move |ctx| {
             let mut elems = vec![];
-            let failed = loop {
-                let res = self.parse(ctx);
-                let Some(elem) = res.success else {
-                    break res;
-                };
-                elems.push(elem);
-            };
-            ParserResult::new(Some(elems), failed.error, failed.pos)
-        })
-    }
+            let mut last_res = self.parse(ctx);
 
-    /// Parse a list using this parser, separated by another delimiter parser. Discards delimiters, and requires at least one match.
-    fn delimited<D>(self, delim: impl Parser<'p, C, D, E> + 'p) -> impl Parser<'p, C, Vec<T>, E>
-    where
-        Self: Sized + 'p,
-        D: 'p,
-    {
-        parser(move |ctx| {
-            let mut elems = vec![];
-            let mut res = self.parse(ctx);
-
-            let Some(elem) = res.success.take() else {
-                return ParserResult::new(None, res.error, res.pos);
+            let Some(elem) = last_res.success.take() else {
+                return ParserResult::new(Some(elems), last_res.error, last_res.pos);
             };
             elems.push(elem);
 
-            let mut last_res = res;
-            let mut delim_start = ctx.cursor();
-            while delim.parse(ctx).success.is_some() {
-                let mut res = self.parse(ctx);
-                let Some(elem) = res.success.take() else {
-                    return ParserResult::new(None, res.error, res.pos)
-                        .integrate_error(last_res)
-                        .set_start_if_empty(delim_start);
+            loop {
+                let res = self.parse(ctx);
+                let Some(elem) = res.success else {
+                    last_res = res.integrate_error(last_res);
+                    break;
                 };
-                last_res = res;
                 elems.push(elem);
-                delim_start = ctx.cursor();
             }
             ParserResult::new(Some(elems), last_res.error, last_res.pos)
         })
     }
 
-    /// Parse a list using this parser, separated by another delimiter parser. Discards delimiters, and allows zero matches.
-    fn optional_delimited<D>(
+    /// Parse a list using this parser, separated by another delimiter parser. Discards delimiters, and requires at least one match.
+    fn delimited<D, const REQUIRED: bool>(
         self,
         delim: impl Parser<'p, C, D, E> + 'p,
     ) -> impl Parser<'p, C, Vec<T>, E>
@@ -126,10 +147,14 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     {
         parser(move |ctx| {
             let mut elems = vec![];
-
             let mut res = self.parse(ctx);
+
             let Some(elem) = res.success.take() else {
-                return ParserResult::new(Some(elems), res.error, res.pos);
+                if REQUIRED {
+                    return ParserResult::new(None, res.error, res.pos);
+                } else {
+                    return ParserResult::new(Some(elems), res.error, res.pos);
+                }
             };
             elems.push(elem);
 
@@ -182,19 +207,113 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         })
     }
 
-    /// Used for parsers which do not uphold the invariant of resetting the parsing head on failure.
-    /// This will automatically reset the position if parsing fails.
-    fn unilateral(self) -> impl Parser<'p, C, T, E>
+    /// Recover by looking ahead a specific number of characters to find the specified pattern.
+    /// Can optionally consume the pattern once it is found, or leave it unparsed.
+    fn recover_to<V, const CONSUME: bool>(
+        self,
+        anchor: impl Parser<'p, C, V, E> + 'p,
+        max_distance: usize,
+    ) -> impl Parser<'p, C, T, E>
+    where
+        T: Recoverable,
+        V: 'p,
+        Self: Sized + 'p,
+    {
+        parser(move |ctx| {
+            ctx.slice();
+            let start = ctx.cursor();
+            let res = self.parse(ctx);
+            if res.success.is_some() && res.pos.end == ctx.cursor() {
+                return res;
+            }
+
+            let mut distance = 0;
+            ctx.advance(res.pos.end - ctx.cursor());
+            while distance < max_distance {
+                let cursor_before = ctx.cursor();
+
+                if anchor.parse(ctx).success.is_some() {
+                    if let Some(err) = res.error {
+                        ctx.add_recovered_error(err, res.pos.clone());
+                    }
+                    if !CONSUME {
+                        ctx.reset(cursor_before);
+                    }
+                    return ParserResult::new(
+                        Some(
+                            res.success
+                                .unwrap_or_else(|| T::error_value(start..ctx.cursor())),
+                        ),
+                        None,
+                        res.pos,
+                    );
+                }
+
+                if let Some(c) = ctx.slice().chars().next() {
+                    if !c.is_ascii_whitespace() {
+                        distance += 1;
+                    }
+                    ctx.advance(c.len_utf8());
+                } else {
+                    break;
+                }
+            }
+            ctx.reset(start);
+            res
+        })
+    }
+
+    /// Recover for a parser which parses values within a set of wrapping literals, usually parens
+    /// or braces. Will respect balancing these delimiters when recovering.
+    fn recover_wrapped(
+        self,
+        open: &'static str,
+        close: &'static str,
+        max_distance: usize,
+    ) -> impl Parser<'p, C, T, E>
     where
         Self: Sized + 'p,
-        E: std::fmt::Debug,
+        T: Recoverable,
     {
         parser(move |ctx| {
             let start = ctx.cursor();
             let res = self.parse(ctx);
-            if res.success.is_none() {
-                ctx.reset(start);
+            if res.success.is_some() || res.pos.end - ctx.cursor() < open.len() {
+                return res;
             }
+
+            let mut depth = 0;
+            let mut distance = 0;
+            while let Some(c) = ctx.slice().chars().next() {
+                if ctx.slice().starts_with(open) {
+                    depth += 1;
+                }
+
+                if ctx.slice().starts_with(close) {
+                    depth -= 1;
+                    if depth == 0 {
+                        ctx.advance(close.len());
+                        if let Some(err) = res.error {
+                            ctx.add_recovered_error(err, res.pos.clone());
+                        }
+                        return ParserResult::new(
+                            Some(Recoverable::error_value(start..ctx.cursor())),
+                            None,
+                            res.pos,
+                        );
+                    }
+                }
+
+                ctx.advance(c.len_utf8());
+                if !c.is_ascii_whitespace() {
+                    distance += 1;
+                }
+                if distance >= max_distance {
+                    break;
+                }
+            }
+
+            ctx.reset(start);
             res
         })
     }
@@ -202,7 +321,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
 
 /// Create a Parser from a lambda which takes in a &[`ParserContext`] and returns a [`ParserResult`].
 pub fn parser<'p, C, T, E>(
-    f: impl Fn(&'p ParserContext<'p, C>) -> ParserResult<T, E> + 'p,
+    f: impl Fn(&'p ParserContext<'p, C, E>) -> ParserResult<T, E> + 'p,
 ) -> impl Parser<'p, C, T, E> + 'p
 where
     C: 'p,
@@ -214,7 +333,7 @@ where
 
 struct ParserImpl<'p, F, C, T, E>(F, PhantomData<&'p (C, T, E)>)
 where
-    F: Fn(&'p ParserContext<'p, C>) -> ParserResult<T, E> + 'p,
+    F: Fn(&'p ParserContext<'p, C, E>) -> ParserResult<T, E> + 'p,
     T: 'p,
     E: 'p;
 
@@ -233,11 +352,11 @@ where
 
 impl<'p, F, C, T, E> Parser<'p, C, T, E> for ParserImpl<'p, F, C, T, E>
 where
-    F: Fn(&'p ParserContext<'p, C>) -> ParserResult<T, E>,
+    F: Fn(&'p ParserContext<'p, C, E>) -> ParserResult<T, E>,
     T: 'p,
     E: 'p,
 {
-    fn parse(&self, ctx: &'p ParserContext<'p, C>) -> ParserResult<T, E> {
+    fn parse(&self, ctx: &'p ParserContext<'p, C, E>) -> ParserResult<T, E> {
         (self.0)(ctx)
     }
 }

@@ -1,6 +1,6 @@
 use std::{fmt::Display, ops::Range};
 
-use crate::context::*;
+use crate::{context::*, ParserError};
 
 #[derive(Debug)]
 /// The output of a [`crate::parser::Parser`]
@@ -66,8 +66,8 @@ impl<T, E> ParserResult<T, E> {
         self
     }
 
-    fn require_complete<C>(mut self, ctx: &ParserContext<C>) -> Self {
-        if ctx.cursor() == ctx.input.len() {
+    fn require_complete<C>(mut self, ctx: &ParserContext<C, E>) -> Self {
+        if ctx.cursor() == ctx.input.len() && ctx.recovered_count() == 0 {
             self
         } else {
             self.success = None;
@@ -78,30 +78,46 @@ impl<T, E> ParserResult<T, E> {
     /// Convert this into a [Result], and generate a pretty error if parsing failed. Parsing is also counted as failed
     /// if the entire input was not consumed, even if a success value is present.
     pub fn pretty_result<C>(
-        mut self,
-        ctx: &ParserContext<C>,
+        self,
+        ctx: &mut ParserContext<C, E>,
         options: PrettyOptions,
     ) -> Result<T, String>
     where
-        E: Display,
+        E: Display + From<ParserError>,
     {
-        self = self.require_complete(ctx);
-        if let Some(success) = self.success {
-            return Ok(success);
-        }
-        let error = match self.error {
-            Some(e) => e.to_string(),
-            None if ctx.cursor() == ctx.input.len() => "Unexpected end of input".to_string(),
-            None => "Unexpected token".to_string(),
-        };
-        Err(pretty_error(ctx.input, self.pos, error, options))
+        self.result(ctx).map_err(|e| {
+            let messages: Vec<_> = e
+                .into_iter()
+                .map(|(pos, err)| pretty_error(ctx.input, pos, err.to_string(), &options))
+                .collect();
+
+            messages.join(options.error_separator)
+        })
     }
 
     /// Convert this into a [Result]. If the entire input was not consumed, the parser is treated as having failed,
     /// even if a success value is present.
-    pub fn result<C>(mut self, ctx: &ParserContext<C>) -> Result<T, Option<E>> {
+    pub fn result<C>(mut self, ctx: &mut ParserContext<C, E>) -> Result<T, Vec<(Range<usize>, E)>>
+    where
+        E: From<ParserError>,
+    {
         self = self.require_complete(ctx);
-        self.success.ok_or(self.error)
+        self.success.ok_or_else(|| {
+            let mut errors: Vec<(Range<usize>, E)> = ctx
+                .take_recovered_errors()
+                .into_iter()
+                .chain(self.error.map(|err| (self.pos, err)))
+                .collect();
+
+            if errors.is_empty() {
+                errors.push((
+                    ctx.cursor()..ctx.cursor(),
+                    ParserError::UnexpectedToken.into(),
+                ));
+            }
+
+            errors
+        })
     }
 }
 
@@ -119,6 +135,8 @@ pub struct PrettyOptions {
     start_pointer_color: &'static str,
     /// The text giving info about the beginning position on multiline errors, defaults to `beginning here`
     start_pointer_text: &'static str,
+    /// The separator between different error messages
+    error_separator: &'static str,
     /// Whether to show the ^ at the position one past the error, where the insertion is probably expected
     show_caret: bool,
 }
@@ -132,6 +150,7 @@ impl PrettyOptions {
             separator_color: "",
             error_indicator_color: "",
             start_pointer_color: "",
+            error_separator: "\n\n==========\n\n",
             start_pointer_text: "beginning here",
             show_caret: true,
         }
@@ -147,6 +166,7 @@ impl Default for PrettyOptions {
             error_indicator_color: "\x1b[31m",
             start_pointer_color: "\x1b[33m",
             start_pointer_text: "beginning here",
+            error_separator: "\n\n\x1b[90m==========\x1b[0m\n\n",
             show_caret: true,
         }
     }
@@ -158,13 +178,15 @@ pub fn pretty_error(
     input: &str,
     span: Range<usize>,
     error: String,
-    colors: PrettyOptions,
+    colors: &PrettyOptions,
 ) -> String {
     let line = line(&input[..span.end]);
     let col = col(&input[..span.end]);
     let display = show_span(input, span.clone(), colors);
+    let yellow = colors.start_pointer_color;
+    let reset = colors.default_color;
     format!(
-        "{display}\n[{line}:{col}] {error}",
+        "{display}\n{yellow}[{line}:{col}]{reset} {error}",
         line = line.max(1),
         col = col.max(1)
     )
@@ -172,7 +194,7 @@ pub fn pretty_error(
 
 /// Generate a display to point out a range in source code.
 #[must_use]
-pub fn show_span(input: &str, span: Range<usize>, options: PrettyOptions) -> String {
+pub fn show_span(input: &str, span: Range<usize>, options: &PrettyOptions) -> String {
     let lines: Vec<_> = lines(input).collect();
 
     let bold_white = options.line_number_color;

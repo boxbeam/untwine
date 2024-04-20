@@ -44,7 +44,9 @@ struct CodegenState {
     parser_name: String,
     parser_types: HashMap<String, Type>,
     parser_lookaheads: HashMap<String, Vec<NextChar>>,
+    wrapped_parsers: HashMap<String, (String, String)>,
     lookahead_optimization: bool,
+    recover: bool,
 }
 
 fn parse_fragment(
@@ -58,7 +60,7 @@ fn parse_fragment(
     let stream = match fragment {
         PatternFragment::Literal(lit) => {
             quote! {
-                literal::<#data, #err>(#lit)
+                untwine::parsers::literal::<#data, #err>(#lit, #parser_name)
             }
         }
         PatternFragment::CharRange(range) => {
@@ -66,7 +68,7 @@ fn parse_fragment(
             let range_min = range.range.start();
             let range_max = range.range.end();
             quote! {
-                char_filter::<#data, #err>(|c| #inverted (#range_min ..= #range_max).contains(c), #parser_name)
+                untwine::parsers::char_filter::<#data, #err>(|c| #inverted (#range_min ..= #range_max).contains(c), #parser_name)
             }
         }
         PatternFragment::CharGroup(group) => {
@@ -77,18 +79,24 @@ fn parse_fragment(
             };
             let chars = &group.chars;
             quote! {
-                char_filter::<#data, #err>(|c| #inverted matches!(c, #(#chars)|*), #parser_name)
+                untwine::parsers::char_filter::<#data, #err>(|c| #inverted matches!(c, #(#chars)|*), #parser_name)
             }
         }
         PatternFragment::CharFilter(filter) => {
             let filter = &filter.expr;
             quote! {
-                char_filter::<#data, #err>(#filter, #parser_name)
+                untwine::parsers::char_filter::<#data, #err>(#filter, #parser_name)
             }
         }
         PatternFragment::ParserRef(parser) => {
+            let recovery = state
+                .wrapped_parsers
+                .get(&parser.to_string())
+                .filter(|_| state.recover)
+                .map(|(open, close)| quote! { .recover_wrapped(#open, #close, 150) });
+
             quote! {
-                parser::<#data, _, #err>(|ctx| #parser(ctx))
+                untwine::parser::parser::<#data, _, #err>(|ctx| #parser(ctx)) #recovery
             }
         }
         PatternFragment::Ignore(pattern) => {
@@ -139,11 +147,17 @@ fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Resu
         Some(Modifier::OptionalRepeating) => quote! {#fragment_parser.optional_repeating()},
         Some(Modifier::Delimited(delimiter)) => {
             let delimiter_parser = parse_fragment(delimiter, state, false)?;
-            quote! {#fragment_parser.delimited(#delimiter_parser)}
+            let recovery = state
+                .recover
+                .then(|| quote! { .recover_to::<_, false>(#delimiter_parser, 30) });
+            quote! {#fragment_parser #recovery .delimited::<_, true>(#delimiter_parser)}
         }
         Some(Modifier::OptionalDelimited(delimiter)) => {
             let delimiter_parser = parse_fragment(delimiter, state, false)?;
-            quote! {#fragment_parser.optional_delimited(#delimiter_parser)}
+            let recovery = state
+                .recover
+                .then(|| quote! { .recover_to::<_, false>(#delimiter_parser, 30) });
+            quote! {#fragment_parser #recovery .delimited::<_, false>(#delimiter_parser)}
         }
         None => fragment_parser,
     };
@@ -190,11 +204,33 @@ fn parse_pattern_choices(
         let parser = parse_patterns(parser, state, capture)?;
 
         let ignore = (!capture).then(|| quote! {.ignore()});
+
+        let success = if state.recover {
+            quote! {
+                if #ctx.recovered_count() > __recovered_start {
+                    let recovered_end = #ctx.last_recovered_end();
+                    if recovered_end > __recovered_max_depth {
+                        __recovered_max_depth = recovered_end;
+                        res.success = Some(val);
+                        __recovered_res = Some(res);
+                        __recovered_errs = #ctx.truncate_recovered(__recovered_start);
+                    }
+                    #ctx.truncate_recovered(__recovered_start);
+                    #ctx.reset(__start);
+                } else {
+                    #ctx.truncate_recovered(__recovered_start);
+                    return ParserResult::new(Some(val), res.error, res.pos).integrate_error(__res);
+                }
+            }
+        } else {
+            quote! { return ParserResult::new(Some(val), res.error, res.pos).integrate_error(__res) }
+        };
+
         parsers.push(quote! {
             {
-                let res = #parser #ignore.parse(#ctx);
+                let mut res = #parser #ignore.parse(#ctx);
                 match res.success {
-                    Some(val) => return ParserResult::new(Some(val), res.error, res.pos).integrate_error(__res),
+                    Some(val) => #success,
                     None => {
                         if res.pos.end > __res.pos.end {
                             __res = res.map(drop);
@@ -205,12 +241,38 @@ fn parse_pattern_choices(
         });
     }
 
+    let recover_start = state.recover.then(|| {
+        quote! {
+            let mut __recovered_res = None;
+            let __recovered_start = #ctx.recovered_count();
+            let mut __recovered_max_depth = 0;
+            let mut __recovered_errs: Vec<(std::ops::Range<usize>, #err)> = vec![];
+        }
+    });
+
+    let recover_end = state.recover.then(|| {
+        quote! {
+            for (pos, err) in __recovered_errs {
+                #ctx.add_recovered_error(err, pos);
+            }
+
+            if let Some(recovered_res) = __recovered_res {
+                return recovered_res;
+            }
+        }
+    });
+
     Ok(quote! {
-        parser::<#data, _, #err>(|#ctx| {
+        untwine::parser::parser::<#data, _, #err>(|#ctx| {
             let mut __res: ParserResult<(), _> = #ctx.result(None, None);
             let __start = #ctx.cursor();
 
+            #recover_start
+
             #(#parsers)*
+
+            #recover_end
+
             if __start == __res.pos.end {
                 return ParserResult::new(None, Some(ParserError::ExpectedToken(#name).into()), __start..__start)
             }
@@ -261,7 +323,7 @@ fn parse_patterns(
     let data = &state.data_type;
     let ctx = &state.parser_context_name;
     Ok(quote! {
-        parser::<#data, _, #err>(|#ctx| {
+        untwine::parser::parser::<#data, _, #err>(|#ctx| {
             let mut __res: ParserResult<(), _> = #ctx.result(None, None);
             let __start = #ctx.cursor();
             #(
@@ -317,7 +379,7 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
         quote! {#block}
     };
     Ok(quote! {
-        #vis fn #name<'p>(#ctx: &'p ParserContext<'p, #data>) -> ParserResult<#typ, #err> {
+        #vis fn #name<'p>(#ctx: &'p ParserContext<'p, #data, #err>) -> ParserResult<#typ, #err> {
             let mut __res: ParserResult<(), _> = #ctx.result(None, None);
             let __start = #ctx.cursor();
             #(
@@ -364,9 +426,11 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
         error_type: block.header.error_type,
         data_type: block.header.data_type,
         lookahead_optimization: block.header.lookahead_optimization,
+        recover: block.header.recover,
         parser_name: Default::default(),
         parser_types,
         parser_lookaheads: lookaheads,
+        wrapped_parsers: get_wrapped_parsers(&block.parsers),
     };
 
     let mut parsers = vec![];
@@ -396,6 +460,33 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
             #exports
         )*
     })
+}
+
+fn get_wrapped_parsers(parsers: &[ParserDef]) -> HashMap<String, (String, String)> {
+    let mut wrappers = HashMap::new();
+
+    for parser in parsers {
+        let patterns = &parser.patterns.patterns;
+        let [first, .., last] = &**patterns else {
+            continue;
+        };
+        let (first, last) = (&first.pattern, &last.pattern);
+        let (
+            Pattern {
+                modifier: None,
+                fragment: PatternFragment::Literal(first),
+            },
+            Pattern {
+                modifier: None,
+                fragment: PatternFragment::Literal(last),
+            },
+        ) = (first, last)
+        else {
+            continue;
+        };
+        wrappers.insert(parser.name.to_string(), (first.value(), last.value()));
+    }
+    wrappers
 }
 
 fn numbered_ident(num: usize) -> Ident {

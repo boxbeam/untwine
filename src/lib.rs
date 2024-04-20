@@ -23,6 +23,7 @@
 use std::{
     fmt::{Debug, Display},
     io::Write,
+    ops::Range,
 };
 
 pub mod error;
@@ -32,6 +33,7 @@ pub mod attr;
 pub mod context;
 pub mod parser;
 pub mod parsers;
+pub mod recoverable;
 pub mod result;
 
 pub mod prelude {
@@ -39,49 +41,52 @@ pub mod prelude {
     pub use attr::*;
     pub use context::ParserContext;
     pub use error::ParserError;
-    pub use macros::parser;
+    pub use macros::{parser, Recoverable};
     pub use parser::*;
     pub use parsers::*;
     pub use result::ParserResult;
 }
 
 use prelude::*;
+pub use recoverable::Recoverable;
 use result::PrettyOptions;
 
 /// Parse a value with a parser function created by the [parser!] block.
 pub fn parse<C, T, E>(
-    parser: impl for<'a> Fn(&'a ParserContext<'a, C>) -> ParserResult<T, E>,
+    parser: impl for<'a> Fn(&'a ParserContext<'a, C, E>) -> ParserResult<T, E>,
     input: &str,
-) -> Result<T, Option<E>>
+) -> Result<T, Vec<(Range<usize>, E)>>
 where
     C: Default,
+    E: From<ParserError>,
 {
-    let ctx = ParserContext::new(input, Default::default());
-    parser(&ctx).result(&ctx)
+    let mut ctx = ParserContext::new(input, Default::default());
+    parser(&ctx).result(&mut ctx)
 }
 
 /// Parse a value with a parser function created by the [parser!] block,
 /// and convert the error to a pretty string if there is one.
 pub fn parse_pretty<C, T, E>(
-    parser: impl for<'a> Fn(&'a ParserContext<'a, C>) -> ParserResult<T, E>,
+    parser: impl for<'a> Fn(&'a ParserContext<'a, C, E>) -> ParserResult<T, E>,
     input: &str,
     colors: PrettyOptions,
 ) -> Result<T, String>
 where
     C: Default,
-    E: Display,
+    E: Display + From<ParserError>,
 {
-    let ctx = ParserContext::new(input, Default::default());
-    parser(&ctx).pretty_result(&ctx, colors)
+    let mut ctx = ParserContext::new(input, Default::default());
+    parser(&ctx).pretty_result(&mut ctx, colors)
 }
 
 /// Launches a (very) simple REPL where you can enter individual lines and see the parser output, useful for testing.
 /// Multiline inputs are not supported, so literal `\n` in the input will be replaced with a newline.
-pub fn parser_repl<C, T, E>(parser: impl for<'a> Fn(&'a ParserContext<'a, C>) -> ParserResult<T, E>)
-where
+pub fn parser_repl<C, T, E>(
+    parser: impl for<'a> Fn(&'a ParserContext<'a, C, E>) -> ParserResult<T, E>,
+) where
     T: Debug,
     C: Default,
-    E: Display,
+    E: Display + From<ParserError>,
 {
     print!("> ");
     std::io::stdout().flush().unwrap();

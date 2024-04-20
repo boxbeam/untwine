@@ -11,6 +11,7 @@ fn operate(left: f64, op: char, right: f64) -> f64 {
 }
 
 parser! {
+    [recover = true]
     sep = #{char::is_ascii_whitespace}*;
     num: num=<"-"? '0'-'9'+ ("." '0'-'9'+)?> -> f64 { num.parse().unwrap() }
     term = (num | "(" sep expr sep ")") -> f64;

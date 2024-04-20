@@ -7,4 +7,5 @@ edition = "2021"
 
 [dependencies]
 insta = "1.38.0"
+thiserror.workspace = true
 untwine = { path = ".." }
