@@ -295,7 +295,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
             let mut depth = 1;
             let mut distance = 0;
             while let Some(c) = ctx.slice().chars().next() {
-                if ctx.slice().starts_with(open) {
+                if ctx.slice().starts_with(open) && open != close {
                     depth += 1;
                 }
 
