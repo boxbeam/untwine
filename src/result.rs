@@ -116,6 +116,8 @@ impl<T, E> ParserResult<T, E> {
                 ));
             }
 
+            errors.sort_by_key(|(pos, _err)| pos.start);
+
             errors
         })
     }
