@@ -529,6 +529,13 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 ///     - The above syntax is not a special case, `untwine::attr::dbg` is its implementation. Any similar function can be used as an attribute.
 ///     - Additional parameters can be passed like `#[myattr(1, "hello")]`.
 ///
+/// ## Using a parser
+/// Every parser specified is rewritten into a regular Rust function, which will parse all of the patterns specified and evaluate your block at the end.
+/// Those which have a visibility modifier like `pub` or `pub(crate)` will be accessible outside of the parser block.
+///
+/// To use one of these parsers, you can either construct a `ParserContext` and call it as normal, or use `untwine::parse` / `untwine::parse_pretty` to get
+/// a regular [Result] instead of untwine's `ParserResult` type.
+
 /// ## Special syntax for parsers
 /// There is an alternate syntax for parsers whose output needs no modification.
 /// The example parser `num_list` above could also be written like this:
@@ -583,12 +590,6 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 ///     - This jump is limited to 150 non-whitespace characters to prevent excessive lookaheads
 ///   - If a parser is annotated with `#[recover_to("literal")]`, the annotated parser will recover using the same strategy as above
 ///   - There is also a `#[recover_to_any(["a", "b"])]` attribute which allows recovering to one of multiple literals
-/// ## Using a parser
-/// Every parser specified is rewritten into a regular Rust function, which will parse all of the patterns specified and evaluate your block at the end.
-/// Those which have a visibility modifier like `pub` or `pub(crate)` will be accessible outside of the parser block.
-///
-/// To use one of these parsers, you can either construct a `ParserContext` and call it as normal, or use `untwine::parse` / `untwine::parse_pretty` to get
-/// a regular [Result] instead of untwine's `ParserResult` type.
 #[proc_macro]
 pub fn parser(input: TokenStream) -> TokenStream {
     let block: ParserBlock = parse_macro_input!(input as ParserBlock);
