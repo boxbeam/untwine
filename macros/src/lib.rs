@@ -555,8 +555,34 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 /// - `error = MyErrorType` - Use `MyErrorType` instead of `ParserError` as the error type for all parsers. `MyErrorType` must implement `From<ParserError>`.
 /// - `context = ctx_name` - Expose the `ParserContext` to the parser function bodies using the name specified.
 /// - `data_type = MyCustomContext` - Specify a custom context type which will be passed to all parser functions. It can be accessed using `.data()` or `.data_mut()` on the context argument.
-/// - `lookahead_optimization = false` - Disable the lookahead optimization, which is on by default. This optimization can improve parser performance by around 30%, but also inflates the size of the generated code, which may cause slower clean builds.
+/// - `lookahead_optimization = false` - Disable the lookahead optimization, which is on by default. This optimization can improve parser performance by as much as double, but also inflates the size of the generated code, which may cause slower clean builds.
+/// - `recovery = true` - Enable automatic error recovery, which allows the parser to continue parsing after an operation fails, following specific rules. Read more below.
 ///
+/// ## Error recovery
+/// Automatic error recovery is one of the most powerful features of Untwine, but it is relatively basic and follows a few simple rules.
+/// Being aware of these rules can help you improve the quality of error messages you get, and you can also specify certain recovery rules
+/// manually using attributes.
+///
+/// In order for error recovery to work, you will need to implement the `Recoverable` trait on types which can be recovered from.
+/// This is like [Default], but can take a range where the error occurred, and is used to generate a value which should be returned
+/// in case of an error which was recovered from.
+///
+/// You can use `#[derive(Recoverable)]` to automatically derive the `Recoverable` trait on your types. If using a struct, all fields
+/// must implement `Recoverable`. If using an enum, the variant to return must have the `#[recover]` attribute, and all constituent
+/// fields must implement `Recoverable`. Note that `Range<usize>` implements this trait, and will return itself, meaning it will auto-populate
+/// to the span of the error that was recovered from.
+///
+/// Here are the rules for error recovery:
+/// - If `recover = true` is set:
+///   - If a named parser begins and ends with unconditional string literals, recovery will happen automatically
+///     - Recovery is attempted by trying to jump ahead to the closing delimiter
+///     - This jump is limited to 1000 non-whitespace characters to prevent excessive lookaheads
+///     - The balance of delimiters will be respected, so `[[]` will not consider the first closing delimiter a match because it is still unbalanced
+///   - If a parser is delimited, when any element fails to parse, attempt to recover to the next delimiter
+///     - This jump respects parent delimiters, so the lookahead will never look past a closing delimiter which ends the scope
+///     - This jump is limited to 150 non-whitespace characters to prevent excessive lookaheads
+///   - If a parser is annotated with `#[recover_to("literal")]`, the annotated parser will recover using the same strategy as above
+///   - There is also a `#[recover_to_any(["a", "b"])]` attribute which allows recovering to one of multiple literals
 /// ## Using a parser
 /// Every parser specified is rewritten into a regular Rust function, which will parse all of the patterns specified and evaluate your block at the end.
 /// Those which have a visibility modifier like `pub` or `pub(crate)` will be accessible outside of the parser block.
