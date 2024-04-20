@@ -63,6 +63,8 @@ respectively.
 
 ![Example expression errors](./screenshots/expr-1.png)
 
+Untwine supports automatic error recovery, enabling the same 12 lines of code to continue parsing after an error to
+discover more errors. A recovered input with error nodes can also be obtained.
 ![Example json errors](./screenshots/json-1.png)
 
 Since errors indicate a range rather than just a single position, multiline errors are also supported:
@@ -75,10 +77,10 @@ and [examples/expr.rs](https://github.com/boxbeam/untwine/blob/master/examples/j
 ## Performance and goals
 
 While Untwine currently has no formal benchmarks, informally I have found parsers written using Untwine to be about
-half as fast as a basic but well-optimized handwritten parser. While Untwine seeks to offer high performance,
+a third as fast as a basic but well-optimized handwritten parser. While Untwine seeks to offer high performance,
 it is not suitable for highly performance-critical parsers.
 
 Most parsing is not so performance-critical, and Untwine is ideal for building programming languages or DSLs,
-though it can also be used for other purposes. It seeks to make parsing so easy that it becomes worthwhile to write
-parsers where it may not have been before, giving you the ability to iterate extremely quickly and eliminate most of
-the pain points of parsing at compiletime, before the parser ever runs.
+where high-quality error messages are more important. It seeks to make parsing so easy that it becomes worthwhile to
+write parsers where it may not have been before, giving you the ability to iterate extremely quickly and eliminate
+most of the pain points of manual parsing.
