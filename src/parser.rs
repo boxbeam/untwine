@@ -160,7 +160,12 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
 
             let mut last_res = res;
             let mut delim_start = ctx.cursor();
-            while delim.parse(ctx).success.is_some() {
+            loop {
+                let delim_res = delim.parse(ctx);
+                if delim_res.success.is_none() {
+                    return ParserResult::new(Some(elems), delim_res.error, delim_res.pos)
+                        .integrate_error(last_res);
+                }
                 let mut res = self.parse(ctx);
                 let Some(elem) = res.success.take() else {
                     return ParserResult::new(None, res.error, res.pos)
@@ -171,7 +176,6 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
                 elems.push(elem);
                 delim_start = ctx.cursor();
             }
-            ParserResult::new(Some(elems), last_res.error, last_res.pos)
         })
     }
 
@@ -278,8 +282,8 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     ) -> impl Parser<'p, C, T, E>
     where
         Self: Sized + 'p,
-        T: Recoverable + std::fmt::Debug,
-        E: From<ParserError> + std::fmt::Debug,
+        T: Recoverable,
+        E: From<ParserError>,
     {
         parser(move |ctx| {
             let start = ctx.cursor();

@@ -307,7 +307,10 @@ fn parse_patterns(
                     },
                     None => {
                         #ctx.reset(__start);
-                        return ParserResult::new(None, res.error, res.pos).integrate_error(__res)
+                        if __res.error.is_some() && __res.pos.end >= res.pos.end {
+                            return ParserResult::new(None, __res.error, __res.pos);
+                        }
+                        return ParserResult::new(None, res.error, res.pos);
                     },
                 }
             };
@@ -362,8 +365,10 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
                     },
                     None => {
                         #ctx.reset(__start);
+                        if __res.error.is_some() && __res.pos.end >= res.pos.end {
+                            return ParserResult::new(None, __res.error, __res.pos);
+                        }
                         return ParserResult::new(None, res.error, res.pos)
-                            .integrate_error(__res)
                             .set_start_if_empty(__start);
                     },
                 }

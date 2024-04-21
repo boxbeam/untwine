@@ -133,4 +133,15 @@ mod tests {
             untwine::parse_pretty(json_value, r#"[[],"#, PrettyOptions::no_color()).unwrap_err()
         );
     }
+
+    #[test]
+    fn test_delimiter_errors() {
+        assert_snapshot!(
+            untwine::parse_pretty(json_value, r#"[1 2]"#, PrettyOptions::no_color()).unwrap_err()
+        );
+
+        assert_snapshot!(
+            untwine::parse_pretty(json_value, r#"[1true"#, PrettyOptions::no_color()).unwrap_err()
+        );
+    }
 }

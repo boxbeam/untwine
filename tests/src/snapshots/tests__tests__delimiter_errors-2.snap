@@ -1,0 +1,13 @@
+---
+source: tests/src/lib.rs
+expression: "untwine::parse_pretty(json_value, r#\"[1true\"#,\n        PrettyOptions::no_color()).unwrap_err()"
+---
+1 | [1true
+    ^
+[1:1] Unmatched delimiter '['
+
+==========
+
+1 | [1true
+    --^
+[1:2] Expected ',' while parsing comma

@@ -41,7 +41,7 @@ enum ParseJSONError {
 parser! {
     [error = ParseJSONError, recover = true]
     sep = #{char::is_ascii_whitespace}*;
-    comma = sep "," sep;
+    comma = (sep "," sep);
     int: num=<"-"? '0'-'9'+> -> JSONValue { JSONValue::Int(num.parse()?) }
     float: num=<"-"? '0'-'9'+ "." '0'-'9'+> -> JSONValue { JSONValue::Float(num.parse()?) }
     str_char = ("\\" . | [^"\""]) -> char;
