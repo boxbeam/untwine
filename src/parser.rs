@@ -330,6 +330,7 @@ where
     T: 'p,
     E: 'p,
 {
+    #[inline(always)]
     fn parse(&self, ctx: &'p ParserContext<'p, C, E>) -> Option<T> {
         (self.func)(ctx)
     }
