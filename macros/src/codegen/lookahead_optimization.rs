@@ -80,7 +80,6 @@ pub fn generate_lookahead_table(
 pub fn generate_lookahead_optional(
     fragment: &PatternFragment,
     parser: TokenStream,
-    default: TokenStream,
     state: &CodegenState,
 ) -> syn::Result<TokenStream> {
     let lookaheads = get_fragment_lookahead(fragment);
@@ -99,7 +98,7 @@ pub fn generate_lookahead_optional(
                 Some( #(#chars)|* ) => {
                     #parser.parse(#ctx)
                 },
-                _ => Some(#default),
+                _ => Some(Default::default()),
             }
         })
     })

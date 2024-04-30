@@ -145,7 +145,7 @@ fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Resu
         Some(Modifier::Optional) => {
             let parser = quote! {#fragment_parser.optional()};
             if state.lookahead_optimization {
-                generate_lookahead_optional(&pattern.fragment, parser, quote! {None}, state)?
+                generate_lookahead_optional(&pattern.fragment, parser, state)?
             } else {
                 quote! {#fragment_parser.optional()}
             }
@@ -154,7 +154,7 @@ fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Resu
         Some(Modifier::OptionalRepeating) => {
             let parser = quote! {#fragment_parser.repeating::<false>()};
             if state.lookahead_optimization {
-                generate_lookahead_optional(&pattern.fragment, parser, quote! {vec![]}, state)?
+                generate_lookahead_optional(&pattern.fragment, parser, state)?
             } else {
                 parser
             }
