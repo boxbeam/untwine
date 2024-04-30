@@ -1,6 +1,7 @@
 use crate::{parser, Parser, ParserError};
 
 /// Create a parser which parses a string literal. Generates errors for partial matches.
+#[inline(always)]
 pub fn literal<'p, C, E>(
     literal: &'static str,
     parser_name: &'static str,
@@ -27,6 +28,7 @@ where
 }
 
 /// Create a parser which parses a single character matching a predicate.
+#[inline(always)]
 pub fn char_filter<'p, C, E>(
     f: impl Fn(&char) -> bool + 'static,
     token_name: &'static str,
