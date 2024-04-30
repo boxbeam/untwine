@@ -66,12 +66,40 @@ pub fn generate_lookahead_table(
     let err = &state.error_type;
 
     Ok(quote! {
-        parser::<#data, _, #err>(|#ctx| {
+        untwine::parser::parser::<#data, _, #err>(|#ctx| {
             match #ctx.slice().chars().next() {
                 #(
                     #branches => #parsers.parse(#ctx),
                 )*
                 _ => #any_case.parse(#ctx)
+            }
+        })
+    })
+}
+
+pub fn generate_lookahead_optional(
+    fragment: &PatternFragment,
+    parser: TokenStream,
+    default: TokenStream,
+    state: &CodegenState,
+) -> syn::Result<TokenStream> {
+    let lookaheads = get_fragment_lookahead(fragment);
+    let lookaheads = resolve_lookaheads(&lookaheads, &state.parser_lookaheads);
+    if lookaheads.contains(&None) || lookaheads.is_empty() {
+        return Ok(parser);
+    }
+    let chars: Vec<char> = lookaheads.iter().flatten().cloned().collect();
+    let ctx = &state.parser_context_name;
+    let data = &state.data_type;
+    let err = &state.error_type;
+
+    Ok(quote! {
+        untwine::parser::parser::<#data, _, #err>(|#ctx| {
+            match #ctx.slice().chars().next() {
+                Some( #(#chars)|* ) => {
+                    #parser.parse(#ctx)
+                },
+                _ => Some(#default),
             }
         })
     })

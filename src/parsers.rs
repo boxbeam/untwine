@@ -1,4 +1,4 @@
-use crate::{parser, Parser, ParserError, ParserResult};
+use crate::{parser, Parser, ParserError};
 
 /// Create a parser which parses a string literal. Generates errors for partial matches.
 pub fn literal<'p, C, E>(
@@ -17,12 +17,12 @@ where
             .count();
         ctx.advance(matched);
         if matched == literal.len() {
-            return ctx.result(Some(()), None);
+            return Some(());
         }
         let err = ParserError::ExpectedLiteral(literal, parser_name).into();
-        let res = ParserResult::new(None, Some(err), ctx.cursor() - matched..ctx.cursor());
+        ctx.err(err);
         ctx.reset(ctx.cursor() - matched);
-        res
+        None
     })
 }
 
@@ -40,10 +40,11 @@ where
         if let Some(next) = next {
             if f(&next) {
                 ctx.advance(next.len_utf8());
-                return ctx.result(Some(next), None);
+                return Some(next);
             }
         };
         let error = ParserError::ExpectedToken(token_name).into();
-        ctx.result(None, Some(error))
+        ctx.err(error);
+        None
     })
 }

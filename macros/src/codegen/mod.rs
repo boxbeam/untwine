@@ -9,7 +9,9 @@ use syn::{Result, Type, Visibility};
 
 use crate::{Modifier, ParserBlock, ParserDef, Pattern, PatternFragment, PatternList};
 
-use self::lookahead_optimization::{build_lookahead_map, generate_lookahead_table, NextChar};
+use self::lookahead_optimization::{
+    build_lookahead_map, generate_lookahead_optional, generate_lookahead_table, NextChar,
+};
 
 mod lookahead_optimization;
 
@@ -141,10 +143,22 @@ fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Resu
 
     let mut pattern_parser = match &pattern.modifier {
         Some(Modifier::Optional) => {
-            quote! {#fragment_parser.optional()}
+            let parser = quote! {#fragment_parser.optional()};
+            if state.lookahead_optimization {
+                generate_lookahead_optional(&pattern.fragment, parser, quote! {None}, state)?
+            } else {
+                quote! {#fragment_parser.optional()}
+            }
         }
-        Some(Modifier::Repeating) => quote! {#fragment_parser.repeating()},
-        Some(Modifier::OptionalRepeating) => quote! {#fragment_parser.optional_repeating()},
+        Some(Modifier::Repeating) => quote! {#fragment_parser.repeating::<true>()},
+        Some(Modifier::OptionalRepeating) => {
+            let parser = quote! {#fragment_parser.repeating::<false>()};
+            if state.lookahead_optimization {
+                generate_lookahead_optional(&pattern.fragment, parser, quote! {vec![]}, state)?
+            } else {
+                parser
+            }
+        }
         Some(Modifier::Delimited(delimiter)) => {
             let delimiter_parser = parse_fragment(delimiter, state, false)?;
             let recovery = state
@@ -207,35 +221,42 @@ fn parse_pattern_choices(
 
         let success = if state.recover {
             quote! {
-                if #ctx.recovered_count() > __recovered_start {
-                    let recovered_end = #ctx.last_recovered_end();
-                    if recovered_end > __recovered_max_depth {
-                        __recovered_max_depth = recovered_end;
-                        res.success = Some(val);
-                        __recovered_res = Some(res);
-                        __recovered_errs = #ctx.truncate_recovered(__recovered_start);
+                {
+                    if #ctx.deepest_err_pos() == #ctx.cursor() {
+                        #ctx.take_err();
                     }
-                    #ctx.truncate_recovered(__recovered_start);
-                    #ctx.reset(__start);
-                } else {
-                    #ctx.truncate_recovered(__recovered_start);
-                    return ParserResult::new(Some(val), res.error, res.pos).integrate_error(__res);
+                    if #ctx.recovered_count() > __recovered_start {
+                        let recovered_end = #ctx.deepest_recovered_err_pos();
+                        if recovered_end > __recovered_max_depth {
+                            __recovered_max_depth = recovered_end;
+                            __recovered_errs = #ctx.truncate_recovered(__recovered_start);
+                        }
+                        #ctx.truncate_recovered(__recovered_start);
+                        #ctx.reset(__start);
+                    } else {
+                        #ctx.truncate_recovered(__recovered_start);
+                        return Some(val);
+                    }
+
                 }
             }
         } else {
-            quote! { return ParserResult::new(Some(val), res.error, res.pos).integrate_error(__res) }
+            quote! {
+                {
+                    if #ctx.deepest_err_pos() == #ctx.cursor() {
+                        #ctx.take_err();
+                    }
+                    return Some(val);
+                }
+            }
         };
 
         parsers.push(quote! {
             {
                 let mut res = #parser #ignore.parse(#ctx);
-                match res.success {
+                match res {
                     Some(val) => #success,
-                    None => {
-                        if res.pos.end > __res.pos.end {
-                            __res = res.map(drop);
-                        }
-                    },
+                    None => {},
                 }
             }
         });
@@ -243,7 +264,6 @@ fn parse_pattern_choices(
 
     let recover_start = state.recover.then(|| {
         quote! {
-            let mut __recovered_res = None;
             let __recovered_start = #ctx.recovered_count();
             let mut __recovered_max_depth = 0;
             let mut __recovered_errs: Vec<(std::ops::Range<usize>, #err)> = vec![];
@@ -253,18 +273,13 @@ fn parse_pattern_choices(
     let recover_end = state.recover.then(|| {
         quote! {
             for (pos, err) in __recovered_errs {
-                #ctx.add_recovered_error(err, pos);
-            }
-
-            if let Some(recovered_res) = __recovered_res {
-                return recovered_res;
+                #ctx.add_recovered_err(pos, err);
             }
         }
     });
 
     Ok(quote! {
         untwine::parser::parser::<#data, _, #err>(|#ctx| {
-            let mut __res: ParserResult<(), _> = #ctx.result(None, None);
             let __start = #ctx.cursor();
 
             #recover_start
@@ -273,10 +288,10 @@ fn parse_pattern_choices(
 
             #recover_end
 
-            if __start == __res.pos.end {
-                return ParserResult::new(None, Some(ParserError::ExpectedToken(#name).into()), __start..__start)
+            if __start == #ctx.deepest_err_pos() {
+                #ctx.replace_err(ParserError::ExpectedToken(#name).into());
             }
-            ParserResult::new(None, __res.error, __res.pos)
+            None
         })
     })
 }
@@ -296,21 +311,21 @@ fn parse_patterns(
         let parser = parse_pattern(pattern, state, capture)?;
         let ident = numbered_ident(i);
         let ctx = &state.parser_context_name;
+        let priority_increase = parsers.len();
 
         let parser = quote! {
             let #ident = {
-                let mut res = #parser.parse(#ctx);
-                match res.success.take() {
+                match #parser.parse(#ctx) {
                     Some(val) => {
-                        __res = __res.integrate_error(res);
+                        if __err_priority > 0 && #ctx.cursor() == #ctx.input.len() {
+                            #ctx.set_err_priority(__err_priority + #priority_increase);
+                        }
                         val
                     },
                     None => {
                         #ctx.reset(__start);
-                        if __res.error.is_some() && __res.pos.end >= res.pos.end {
-                            return ParserResult::new(None, __res.error, __res.pos);
-                        }
-                        return ParserResult::new(None, res.error, res.pos);
+                        #ctx.set_err_priority(__err_priority);
+                        return None;
                     },
                 }
             };
@@ -327,12 +342,14 @@ fn parse_patterns(
     let ctx = &state.parser_context_name;
     Ok(quote! {
         untwine::parser::parser::<#data, _, #err>(|#ctx| {
-            let mut __res: ParserResult<(), _> = #ctx.result(None, None);
             let __start = #ctx.cursor();
+            let __err_priority = #ctx.get_err_priority();
             #(
                 #parsers
             )*
-            ParserResult::new(Some(( #(#captured),* )), __res.error, __res.pos).set_start_if_empty(__start)
+            #ctx.set_err_start(__start);
+            #ctx.set_err_priority(__err_priority);
+            Some(( #(#captured),* ))
         })
     })
 }
@@ -354,22 +371,22 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
             .map(|ident| quote! {let #ident =})
             .unwrap_or_default();
         let parser = parse_pattern(&pattern.pattern, state, pattern.label.is_some())?;
+        let priority_increase = parsers.len();
 
         parsers.push(quote! {
             #prefix {
-                let mut res = #parser.parse(#ctx);
-                match res.success.take() {
+                match #parser.parse(#ctx) {
                     Some(val) => {
-                        __res = __res.integrate_error(res);
+                        if __err_priority > 0 && #ctx.cursor() == #ctx.input.len() {
+                            #ctx.set_err_priority(__err_priority + #priority_increase);
+                        }
                         val
                     },
                     None => {
                         #ctx.reset(__start);
-                        if __res.error.is_some() && __res.pos.end >= res.pos.end {
-                            return ParserResult::new(None, __res.error, __res.pos);
-                        }
-                        return ParserResult::new(None, res.error, res.pos)
-                            .set_start_if_empty(__start);
+                        #ctx.set_err_start(__start);
+                        #ctx.set_err_priority(__err_priority);
+                        return None;
                     },
                 }
             };
@@ -384,19 +401,22 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
         quote! {#block}
     };
     Ok(quote! {
-        #vis fn #name<'p>(#ctx: &'p ParserContext<'p, #data, #err>) -> ParserResult<#typ, #err> {
-            let mut __res: ParserResult<(), _> = #ctx.result(None, None);
+        #vis fn #name<'p>(#ctx: &'p ParserContext<'p, #data, #err>) -> Option<#typ> {
             let __start = #ctx.cursor();
+            let __err_priority = #ctx.get_err_priority();
             #(
                 #parsers
             )*
 
+            #ctx.set_err_priority(__err_priority);
             let res = (move || -> Result<#typ, #err> { Ok(#block) })();
             match res {
-                Ok(val) => #ctx.result(Some(val), None).integrate_error(__res),
+                Ok(val) => Some(val),
                 Err(err) => {
                     #ctx.reset(__start);
-                    ParserResult::new(None, Some(err), __res.pos)
+                    #ctx.replace_err(err);
+                    #ctx.set_err_start(__start);
+                    None
                 },
             }
         }

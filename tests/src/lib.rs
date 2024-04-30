@@ -7,7 +7,7 @@ mod tests {
     };
 
     use insta::assert_snapshot;
-    use untwine::{parser, prelude::Recoverable, result::PrettyOptions};
+    use untwine::{parser, prelude::Recoverable, pretty::PrettyOptions};
 
     parser! {
         num: num=<'0'-'9'+> -> u32 { num.parse().unwrap() }

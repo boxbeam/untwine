@@ -33,8 +33,8 @@ pub mod attr;
 pub mod context;
 pub mod parser;
 pub mod parsers;
+pub mod pretty;
 pub mod recoverable;
-pub mod result;
 
 pub mod prelude {
     use super::*;
@@ -44,16 +44,15 @@ pub mod prelude {
     pub use macros::{parser, Recoverable};
     pub use parser::*;
     pub use parsers::*;
-    pub use result::ParserResult;
 }
 
 use prelude::*;
+use pretty::PrettyOptions;
 pub use recoverable::Recoverable;
-use result::PrettyOptions;
 
 /// Parse a value with a parser function created by the [parser!] block.
 pub fn parse<C, T, E>(
-    parser: impl for<'a> Fn(&'a ParserContext<'a, C, E>) -> ParserResult<T, E>,
+    parser: impl for<'a> Fn(&'a ParserContext<'a, C, E>) -> Option<T>,
     input: &str,
 ) -> Result<T, Vec<(Range<usize>, E)>>
 where
@@ -61,13 +60,14 @@ where
     E: From<ParserError>,
 {
     let mut ctx = ParserContext::new(input, Default::default());
-    parser(&ctx).result(&mut ctx)
+    let res = parser(&ctx);
+    ctx.result(res)
 }
 
 /// Parse a value with a parser function created by the [parser!] block,
 /// and convert the error to a pretty string if there is one.
 pub fn parse_pretty<C, T, E>(
-    parser: impl for<'a> Fn(&'a ParserContext<'a, C, E>) -> ParserResult<T, E>,
+    parser: impl for<'a> Fn(&'a ParserContext<'a, C, E>) -> Option<T>,
     input: &str,
     colors: PrettyOptions,
 ) -> Result<T, String>
@@ -76,14 +76,14 @@ where
     E: Display + From<ParserError>,
 {
     let mut ctx = ParserContext::new(input, Default::default());
-    parser(&ctx).pretty_result(&mut ctx, colors)
+    let res = parser(&ctx);
+    ctx.pretty_result(res, colors)
 }
 
 /// Launches a (very) simple REPL where you can enter individual lines and see the parser output, useful for testing.
 /// Multiline inputs are not supported, so literal `\n` in the input will be replaced with a newline.
-pub fn parser_repl<C, T, E>(
-    parser: impl for<'a> Fn(&'a ParserContext<'a, C, E>) -> ParserResult<T, E>,
-) where
+pub fn parser_repl<C, T, E>(parser: impl for<'a> Fn(&'a ParserContext<'a, C, E>) -> Option<T>)
+where
     T: Debug,
     C: Default,
     E: Display + From<ParserError>,

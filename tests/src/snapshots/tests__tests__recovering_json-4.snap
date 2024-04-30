@@ -9,5 +9,5 @@ expression: "untwine::parse_pretty(json_value, r#\"[[],\"#,\n        PrettyOptio
 ==========
 
 1 | [[],
-       -^
+        ^
 [1:4] Expected json value

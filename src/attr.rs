@@ -1,4 +1,4 @@
-use crate::{literal, parser, Parser, ParserError, ParserResult, Recoverable};
+use crate::{literal, parser, Parser, ParserError, Recoverable};
 use std::fmt::Debug;
 
 /// Static data provided to parser attributes.
@@ -32,19 +32,6 @@ where
     })
 }
 
-/// Ignores the error output of the pattern.
-pub fn ignore_err<'p, C, T, E>(
-    parser: impl Parser<'p, C, T, E> + 'p,
-    _meta: PatternMeta,
-) -> impl Parser<'p, C, T, E>
-where
-    E: Debug + 'p,
-    C: 'p,
-    T: 'p,
-{
-    parser.ignore_err()
-}
-
 /// When the wrapped pattern fails to parse, try to jump ahead to a specific literal,
 /// but do not consume it. This allows you to specify an "anchor" from which parsing
 /// can continue.
@@ -76,14 +63,10 @@ where
 {
     input.recover_to::<_, false>(
         parser(move |ctx| {
-            ParserResult::new(
-                anchor
-                    .iter()
-                    .any(|s| ctx.slice().starts_with(s))
-                    .then_some(()),
-                None,
-                ctx.cursor()..ctx.cursor(),
-            )
+            anchor
+                .iter()
+                .any(|s| ctx.slice().starts_with(s))
+                .then_some(())
         }),
         150,
     )

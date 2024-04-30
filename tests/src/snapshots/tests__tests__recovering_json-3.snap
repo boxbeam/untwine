@@ -3,14 +3,8 @@ source: tests/src/lib.rs
 expression: "untwine::parse_pretty(json_value, r#\"[1., 2.5\"#,\n        PrettyOptions::no_color()).unwrap_err()"
 ---
 1 | [1., 2.5
-    ^
-[1:1] Unmatched delimiter '['
-
-==========
-
-1 | [1., 2.5
     --------^
-[1:8] Expected ',' while parsing comma
+[1:8] Expected ']' while parsing list
 
 ==========
 

@@ -9,5 +9,5 @@ expression: "untwine::parse_pretty(json_value, r#\"[1true\"#,\n        PrettyOpt
 ==========
 
 1 | [1true
-    --^
+      ^
 [1:2] Expected ',' while parsing comma

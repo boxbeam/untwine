@@ -1,127 +1,6 @@
-use std::{fmt::Display, ops::Range};
+use std::ops::Range;
 
-use crate::{context::*, ParserError};
-
-#[derive(Debug)]
-/// The output of a [`crate::parser::Parser`]
-pub struct ParserResult<T, E> {
-    /// The successfully-parsed value.
-    pub success: Option<T>,
-    /// The deepest error encountered, even if parsing succeeded.
-    pub error: Option<E>,
-    /// The deepest position encountered when parsing, including failed branches.
-    pub pos: Range<usize>,
-}
-
-impl<T, E> ParserResult<T, E> {
-    /// Map the output type using a mapping function.
-    pub fn map<V>(self, f: impl FnOnce(T) -> V) -> ParserResult<V, E> {
-        ParserResult {
-            success: self.success.map(f),
-            error: self.error,
-            pos: self.pos,
-        }
-    }
-
-    /// Map the error type using a mapping function.
-    pub fn map_err<E2>(self, f: impl FnOnce(E) -> E2) -> ParserResult<T, E2> {
-        ParserResult {
-            error: self.error.map(f),
-            success: self.success,
-            pos: self.pos,
-        }
-    }
-
-    pub fn new(success: Option<T>, error: Option<E>, pos: Range<usize>) -> Self {
-        ParserResult {
-            success,
-            error,
-            pos,
-        }
-    }
-
-    /// Integrate the error of another [`ParserResult`], if its position is higher.
-    pub fn integrate_error<V>(mut self, other: ParserResult<V, E>) -> Self {
-        if other.pos.end > self.pos.end {
-            self.error = other.error;
-            self.pos = other.pos;
-        }
-        self
-    }
-
-    /// Generate a [`ParserResult`] holding a success value and no error.
-    pub fn success(result: T, pos: usize) -> Self {
-        ParserResult {
-            success: Some(result),
-            error: None,
-            pos: pos..pos,
-        }
-    }
-
-    /// Set the start of the error range if it hasn't already been set.
-    pub fn set_start_if_empty(mut self, start: usize) -> Self {
-        if self.pos.is_empty() {
-            self.pos.start = start;
-        }
-        self
-    }
-
-    fn require_complete<C>(mut self, ctx: &ParserContext<C, E>) -> Self {
-        if ctx.cursor() == ctx.input.len() && ctx.recovered_count() == 0 {
-            self
-        } else {
-            self.success = None;
-            self
-        }
-    }
-
-    /// Convert this into a [Result], and generate a pretty error if parsing failed. Parsing is also counted as failed
-    /// if the entire input was not consumed, even if a success value is present.
-    pub fn pretty_result<C>(
-        self,
-        ctx: &mut ParserContext<C, E>,
-        options: PrettyOptions,
-    ) -> Result<T, String>
-    where
-        E: Display + From<ParserError>,
-    {
-        self.result(ctx).map_err(|e| {
-            let messages: Vec<_> = e
-                .into_iter()
-                .map(|(pos, err)| pretty_error(ctx.input, pos, err.to_string(), &options))
-                .collect();
-
-            messages.join(options.error_separator)
-        })
-    }
-
-    /// Convert this into a [Result]. If the entire input was not consumed, the parser is treated as having failed,
-    /// even if a success value is present.
-    pub fn result<C>(mut self, ctx: &mut ParserContext<C, E>) -> Result<T, Vec<(Range<usize>, E)>>
-    where
-        E: From<ParserError>,
-    {
-        self = self.require_complete(ctx);
-        self.success.ok_or_else(|| {
-            let mut errors: Vec<(Range<usize>, E)> = ctx
-                .take_recovered_errors()
-                .into_iter()
-                .chain(self.error.map(|err| (self.pos, err)))
-                .collect();
-
-            if errors.is_empty() {
-                errors.push((
-                    ctx.cursor()..ctx.cursor(),
-                    ParserError::UnexpectedToken.into(),
-                ));
-            }
-
-            errors.sort_by_key(|(pos, _err)| pos.start);
-
-            errors
-        })
-    }
-}
+use crate::context::*;
 
 /// Options to configure the output of pretty errors
 pub struct PrettyOptions {
@@ -138,7 +17,7 @@ pub struct PrettyOptions {
     /// The text giving info about the beginning position on multiline errors, defaults to `beginning here`
     start_pointer_text: &'static str,
     /// The separator between different error messages
-    error_separator: &'static str,
+    pub(crate) error_separator: &'static str,
     /// Whether to show the ^ at the position one past the error, where the insertion is probably expected
     show_caret: bool,
 }

@@ -1,6 +1,6 @@
 use std::{cell::UnsafeCell, marker::PhantomData};
 
-use crate::{context::ParserContext, result::ParserResult, ParserError, Recoverable};
+use crate::{context::ParserContext, ParserError, Recoverable};
 
 pub struct AppendCell<T> {
     inner: UnsafeCell<Vec<T>>,
@@ -50,7 +50,7 @@ impl<T> AppendCell<T> {
 /// for modifying its behavior.
 pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     /// Parse a value from the [`ParserContext`]. On fail, the context will be reset to the starting position.
-    fn parse(&self, ctx: &'p ParserContext<'p, C, E>) -> ParserResult<T, E>;
+    fn parse(&self, ctx: &'p ParserContext<'p, C, E>) -> Option<T>;
 
     /// Map the output value using a mapping function.
     fn map<V: 'p>(self, f: impl Fn(T) -> V + 'p) -> impl Parser<'p, C, V, E> + 'p
@@ -66,8 +66,10 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         Self: Sized + 'p,
     {
         parser(move |ctx| {
-            let res = self.parse(ctx);
-            ParserResult::new(Some(res.success), res.error, res.pos)
+            let priority = ctx.get_err_priority();
+            let output = Some(self.parse(ctx));
+            ctx.set_err_priority(priority);
+            output
         })
     }
 
@@ -76,63 +78,42 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     where
         Self: Sized + 'p,
     {
+        parser(move |ctx| self.parse(ctx).or_else(|| other.parse(ctx)))
+    }
+
+    /// Try to parse as many times as possible in sequence, optionally requiring at least one match.
+    fn repeating<const REQUIRED: bool>(self) -> impl Parser<'p, C, Vec<T>, E>
+    where
+        Self: Sized + 'p,
+    {
         parser(move |ctx| {
+            let mut elems = vec![];
+            let priority = ctx.get_err_priority();
+            if !REQUIRED {
+                ctx.set_err_priority(0);
+            }
             let res = self.parse(ctx);
-            if res.success.is_some() {
-                return res;
-            }
-            other.parse(ctx).integrate_error(res)
-        })
-    }
-
-    /// Try to parse as many times as possible in sequence, requiring at least one match.
-    fn repeating(self) -> impl Parser<'p, C, Vec<T>, E>
-    where
-        Self: Sized + 'p,
-    {
-        parser(move |ctx| {
-            let mut elems = vec![];
-            let mut last_res = self.parse(ctx);
-            let Some(elem) = last_res.success.take() else {
-                return ParserResult::new(None, last_res.error, last_res.pos);
+            let Some(elem) = res else {
+                if REQUIRED {
+                    return None;
+                } else {
+                    ctx.set_err_priority(priority);
+                    return Some(elems);
+                }
             };
+            if REQUIRED {
+                ctx.set_err_priority(0);
+            }
             elems.push(elem);
 
             loop {
-                let res = self.parse(ctx);
-                let Some(elem) = res.success else {
-                    last_res = res.integrate_error(last_res);
+                let Some(elem) = self.parse(ctx) else {
                     break;
                 };
                 elems.push(elem);
             }
-            ParserResult::new(Some(elems), last_res.error, last_res.pos)
-        })
-    }
-
-    /// Try to parse as many times as possible in sequence, allowing zero matches.
-    fn optional_repeating(self) -> impl Parser<'p, C, Vec<T>, E>
-    where
-        Self: Sized + 'p,
-    {
-        parser(move |ctx| {
-            let mut elems = vec![];
-            let mut last_res = self.parse(ctx);
-
-            let Some(elem) = last_res.success.take() else {
-                return ParserResult::new(Some(elems), last_res.error, last_res.pos);
-            };
-            elems.push(elem);
-
-            loop {
-                let res = self.parse(ctx);
-                let Some(elem) = res.success else {
-                    last_res = res.integrate_error(last_res);
-                    break;
-                };
-                elems.push(elem);
-            }
-            ParserResult::new(Some(elems), last_res.error, last_res.pos)
+            ctx.set_err_priority(priority);
+            Some(elems)
         })
     }
 
@@ -147,32 +128,26 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     {
         parser(move |ctx| {
             let mut elems = vec![];
-            let mut res = self.parse(ctx);
 
-            let Some(elem) = res.success.take() else {
+            let Some(elem) = self.parse(ctx) else {
                 if REQUIRED {
-                    return ParserResult::new(None, res.error, res.pos);
+                    return None;
                 } else {
-                    return ParserResult::new(Some(elems), res.error, res.pos);
+                    return Some(elems);
                 }
             };
             elems.push(elem);
 
-            let mut last_res = res;
             let mut delim_start = ctx.cursor();
             loop {
                 let delim_res = delim.parse(ctx);
-                if delim_res.success.is_none() {
-                    return ParserResult::new(Some(elems), delim_res.error, delim_res.pos)
-                        .integrate_error(last_res);
+                if delim_res.is_none() {
+                    return Some(elems);
                 }
-                let mut res = self.parse(ctx);
-                let Some(elem) = res.success.take() else {
-                    return ParserResult::new(None, res.error, res.pos)
-                        .integrate_error(last_res)
-                        .set_start_if_empty(delim_start);
+                let Some(elem) = self.parse(ctx) else {
+                    ctx.set_err_start(delim_start);
+                    return None;
                 };
-                last_res = res;
                 elems.push(elem);
                 delim_start = ctx.cursor();
             }
@@ -185,18 +160,6 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         Self: Sized + 'p,
     {
         self.map(drop)
-    }
-
-    /// Ignore the error output of this parser.
-    fn ignore_err(self) -> impl Parser<'p, C, T, E>
-    where
-        Self: Sized + 'p,
-    {
-        parser(move |ctx| {
-            let mut res = self.parse(ctx);
-            res.error = None;
-            res
-        })
     }
 
     /// Capture the span of the parsed value as a [&str] instead of the value of itself.
@@ -227,12 +190,13 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
             ctx.slice();
             let start = ctx.cursor();
             let res = self.parse(ctx);
-            if res.success.is_some() && res.pos.end == ctx.cursor() {
+            if res.is_some() && ctx.deepest_err_pos() <= ctx.cursor() {
                 return res;
             }
 
             let mut distance = 0;
-            ctx.advance(res.pos.end - ctx.cursor());
+            let _lock = ctx.lock_errors();
+            ctx.reset(ctx.deepest_err_pos());
             while distance < max_distance
                 && !ctx
                     .recover_terminator
@@ -241,21 +205,12 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
             {
                 let cursor_before = ctx.cursor();
 
-                if anchor.parse(ctx).success.is_some() {
-                    if let Some(err) = res.error {
-                        ctx.add_recovered_error(err, res.pos.clone());
-                    }
+                if anchor.parse(ctx).is_some() {
                     if !CONSUME {
                         ctx.reset(cursor_before);
                     }
-                    return ParserResult::new(
-                        Some(
-                            res.success
-                                .unwrap_or_else(|| T::error_value(start..ctx.cursor())),
-                        ),
-                        None,
-                        res.pos,
-                    );
+                    ctx.recover_err();
+                    return Some(res.unwrap_or_else(|| T::error_value(start..ctx.cursor())));
                 }
 
                 if let Some(c) = ctx.slice().chars().next() {
@@ -290,12 +245,12 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
             let parent_terminator = ctx.recover_terminator.get();
             ctx.recover_terminator.set(Some(close));
             let res = self.parse(ctx);
-            if res.success.is_some() || res.pos.end - ctx.cursor() <= open.len() {
+            if res.is_some() || ctx.deepest_err_pos() - ctx.cursor() <= open.len() {
                 ctx.recover_terminator.set(parent_terminator);
                 return res;
             }
 
-            ctx.reset(res.pos.end.max(ctx.last_recovered_end()));
+            ctx.reset(ctx.deepest_err_pos().max(ctx.deepest_recovered_err_pos()));
             let mut depth = 1;
             let mut distance = 0;
             while let Some(c) = ctx.slice().chars().next() {
@@ -307,15 +262,9 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
                     depth -= 1;
                     if depth == 0 {
                         ctx.advance(close.len());
-                        if let Some(err) = res.error {
-                            ctx.add_recovered_error(err, res.pos.clone());
-                        }
+                        ctx.recover_err();
                         ctx.recover_terminator.set(parent_terminator);
-                        return ParserResult::new(
-                            Some(Recoverable::error_value(start..ctx.cursor())),
-                            None,
-                            res.pos,
-                        );
+                        return Some(Recoverable::error_value(start..ctx.cursor()));
                     }
                 }
 
@@ -329,8 +278,8 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
             }
 
             ctx.reset(start);
-            if res.pos.start != start {
-                ctx.add_recovered_error(ParserError::UnmatchedDelimiter(open).into(), start..start);
+            if ctx.err_range().start != start {
+                ctx.add_recovered_err(start..start, ParserError::UnmatchedDelimiter(open).into());
             }
             res
         })
@@ -339,21 +288,28 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
 
 /// Create a Parser from a lambda which takes in a &[`ParserContext`] and returns a [`ParserResult`].
 pub fn parser<'p, C, T, E>(
-    f: impl Fn(&'p ParserContext<'p, C, E>) -> ParserResult<T, E> + 'p,
+    f: impl Fn(&'p ParserContext<'p, C, E>) -> Option<T> + 'p,
 ) -> impl Parser<'p, C, T, E> + 'p
 where
     C: 'p,
     T: 'p,
     E: 'p,
 {
-    ParserImpl(f, PhantomData)
+    ParserImpl {
+        func: f,
+        phantom: PhantomData,
+    }
 }
 
-struct ParserImpl<'p, F, C, T, E>(F, PhantomData<&'p (C, T, E)>)
+struct ParserImpl<'p, F, C, T, E>
 where
-    F: Fn(&'p ParserContext<'p, C, E>) -> ParserResult<T, E> + 'p,
+    F: Fn(&'p ParserContext<'p, C, E>) -> Option<T> + 'p,
     T: 'p,
-    E: 'p;
+    E: 'p,
+{
+    func: F,
+    phantom: PhantomData<&'p (C, T, E)>,
+}
 
 mod private {
     pub trait SealedParser<C, T, E> {}
@@ -370,11 +326,11 @@ where
 
 impl<'p, F, C, T, E> Parser<'p, C, T, E> for ParserImpl<'p, F, C, T, E>
 where
-    F: Fn(&'p ParserContext<'p, C, E>) -> ParserResult<T, E>,
+    F: Fn(&'p ParserContext<'p, C, E>) -> Option<T>,
     T: 'p,
     E: 'p,
 {
-    fn parse(&self, ctx: &'p ParserContext<'p, C, E>) -> ParserResult<T, E> {
-        (self.0)(ctx)
+    fn parse(&self, ctx: &'p ParserContext<'p, C, E>) -> Option<T> {
+        (self.func)(ctx)
     }
 }
