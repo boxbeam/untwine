@@ -401,6 +401,7 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
         quote! {#block}
     };
     Ok(quote! {
+        #[inline(always)]
         #vis fn #name<'p>(#ctx: &'p ParserContext<'p, #data, #err>) -> Option<#typ> {
             let __start = #ctx.cursor();
             let __err_priority = #ctx.get_err_priority();
