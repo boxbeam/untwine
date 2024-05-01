@@ -7,7 +7,7 @@ mod tests {
     };
 
     use insta::assert_snapshot;
-    use untwine::{parser, prelude::Recoverable, pretty::PrettyOptions};
+    use untwine::{parse, parse_pretty, parser, prelude::Recoverable, pretty::PrettyOptions};
 
     parser! {
         num: num=<'0'-'9'+> -> u32 { num.parse().unwrap() }
@@ -35,27 +35,19 @@ mod tests {
 
     #[test]
     pub fn test_num_list() {
-        assert_eq!(untwine::parse(num_list, "1,2,3").unwrap(), vec![1, 2, 3]);
-        assert_snapshot!(
-            untwine::parse_pretty(num_list, "1,2,", PrettyOptions::no_color()).unwrap_err()
-        );
+        assert_eq!(parse(num_list, "1,2,3").unwrap(), vec![1, 2, 3]);
+        assert_snapshot!(parse_pretty(num_list, "1,2,", PrettyOptions::no_color()).unwrap_err());
     }
 
     #[test]
     pub fn test_expr() {
-        assert_eq!(untwine::parse(expr, "1+2*3").unwrap(), 7.0);
-        assert_eq!(untwine::parse(expr, "1+(3/4)").unwrap(), 1.75);
-        assert_eq!(untwine::parse(expr, "4--1").unwrap(), 5.0);
-        assert_snapshot!(untwine::parse_pretty(expr, "1.", PrettyOptions::no_color()).unwrap_err());
-        assert_snapshot!(
-            untwine::parse_pretty(expr, "(1\n\n+", PrettyOptions::no_color()).unwrap_err()
-        );
-        assert_snapshot!(
-            untwine::parse_pretty(expr, "(1\n\n+5", PrettyOptions::no_color()).unwrap_err()
-        );
-        assert_snapshot!(
-            untwine::parse_pretty(expr, "--1", PrettyOptions::no_color()).unwrap_err()
-        );
+        assert_eq!(parse(expr, "1+2*3").unwrap(), 7.0);
+        assert_eq!(parse(expr, "1+(3/4)").unwrap(), 1.75);
+        assert_eq!(parse(expr, "4--1").unwrap(), 5.0);
+        assert_snapshot!(parse_pretty(expr, "1.", PrettyOptions::no_color()).unwrap_err());
+        assert_snapshot!(parse_pretty(expr, "(1\n\n+", PrettyOptions::no_color()).unwrap_err());
+        assert_snapshot!(parse_pretty(expr, "(1\n\n+5", PrettyOptions::no_color()).unwrap_err());
+        assert_snapshot!(parse_pretty(expr, "--1", PrettyOptions::no_color()).unwrap_err());
     }
 
     #[derive(Debug, Recoverable)]
@@ -108,40 +100,64 @@ mod tests {
 
     #[test]
     fn test_recovering_json() {
-        assert_snapshot!(untwine::parse_pretty(
+        assert_snapshot!(parse_pretty(
             json_value,
             r#"{"a" true, "b" fals}"#,
             PrettyOptions::no_color()
         )
         .unwrap_err());
 
-        assert_snapshot!(untwine::parse_pretty(
-            json_value,
-            r#"[[,], 3, 1.]"#,
-            PrettyOptions::no_color()
-        )
-        .unwrap_err());
-
-        assert_snapshot!(untwine::parse_pretty(
-            json_value,
-            r#"[1., 2.5"#,
-            PrettyOptions::no_color()
-        )
-        .unwrap_err());
+        assert_snapshot!(
+            parse_pretty(json_value, r#"[[,], 3, 1.]"#, PrettyOptions::no_color()).unwrap_err()
+        );
 
         assert_snapshot!(
-            untwine::parse_pretty(json_value, r#"[[],"#, PrettyOptions::no_color()).unwrap_err()
+            parse_pretty(json_value, r#"[1., 2.5"#, PrettyOptions::no_color()).unwrap_err()
+        );
+
+        assert_snapshot!(
+            parse_pretty(json_value, r#"[[],"#, PrettyOptions::no_color()).unwrap_err()
         );
     }
 
     #[test]
     fn test_delimiter_errors() {
         assert_snapshot!(
-            untwine::parse_pretty(json_value, r#"[1 2]"#, PrettyOptions::no_color()).unwrap_err()
+            parse_pretty(json_value, r#"[1 2]"#, PrettyOptions::no_color()).unwrap_err()
         );
 
         assert_snapshot!(
-            untwine::parse_pretty(json_value, r#"[1true"#, PrettyOptions::no_color()).unwrap_err()
+            parse_pretty(json_value, r#"[1true"#, PrettyOptions::no_color()).unwrap_err()
         );
+    }
+
+    parser! {
+        int = <"-"? '0'-'9'+> -> &str;
+        float = <"-"? '0'-'9'+ "." '0'-'9'+> -> &str;
+        pub number = #(float | int);
+    }
+
+    #[test]
+    fn test_numbers() {
+        assert!(parse(number, "1").is_ok());
+        assert!(parse(number, "-1").is_ok());
+        assert!(parse(number, "-1.5").is_ok());
+        assert!(parse(number, "-1.5a").is_err());
+        assert!(parse(number, "").is_err());
+    }
+
+    parser! {
+        pub paren = ("(" paren* ")")+;
+    }
+
+    #[test]
+    fn test_parens() {
+        assert!(parse(paren, "").is_err());
+        assert!(parse(paren, "()").is_ok());
+        assert!(parse(paren, "()()").is_ok());
+        assert!(parse(paren, "(()").is_err());
+        assert!(parse(paren, "(()").is_err());
+        assert!(parse(paren, "(()))").is_err());
+        assert!(parse(paren, "(()(()))()").is_ok());
     }
 }
