@@ -20,7 +20,6 @@ mod recoverable;
 mod kw {
     use syn::custom_keyword;
 
-    custom_keyword!(i);
     custom_keyword!(error);
     custom_keyword!(context);
     custom_keyword!(data);
@@ -64,7 +63,7 @@ impl Parse for HeaderParam {
             input.parse::<Token![=]>()?;
             Ok(HeaderParam::Recover(input.parse()?))
         } else {
-            Err(input.error("expected parameter name 'error' or 'context'"))
+            Err(input.error("expected one of 'error', 'context', 'data', 'lookahead_optimization', or 'recover'"))
         }
     }
 }
@@ -220,7 +219,7 @@ impl Parse for PatternFragment {
             input.parse().map(PatternFragment::CharGroup)
         } else if input.peek(Brace) {
             input.parse().map(PatternFragment::CharFilter)
-        } else if input.peek(LitStr) || input.peek(kw::i) {
+        } else if input.peek(LitStr) {
             input.parse().map(PatternFragment::Literal)
         } else if input.peek(Paren) {
             let content;
