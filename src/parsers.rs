@@ -8,7 +8,7 @@ pub fn literal<'p, C, E>(
 ) -> impl Parser<'p, C, (), E>
 where
     C: 'p,
-    E: From<ParserError> + 'p + std::fmt::Debug,
+    E: From<ParserError> + 'p,
 {
     parser(move |ctx| {
         let matched = literal
@@ -34,7 +34,7 @@ pub fn char_filter<'p, C, E>(
     token_name: &'static str,
 ) -> impl Parser<'p, C, char, E>
 where
-    E: From<ParserError> + 'p + std::fmt::Debug,
+    E: From<ParserError> + 'p,
     C: 'p,
 {
     parser(move |ctx| {

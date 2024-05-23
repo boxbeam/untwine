@@ -177,7 +177,6 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         T: Recoverable,
         V: 'p,
         Self: Sized + 'p,
-        E: std::fmt::Debug,
     {
         parser(move |ctx| {
             ctx.slice();
@@ -231,7 +230,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     where
         Self: Sized + 'p,
         T: Recoverable,
-        E: From<ParserError> + std::fmt::Debug,
+        E: From<ParserError>,
     {
         parser(move |ctx| {
             let start = ctx.cursor();

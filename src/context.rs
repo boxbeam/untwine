@@ -168,10 +168,7 @@ impl<'p, C, E> ParserContext<'p, C, E> {
     /// Overwrite the error stored in the context, if the position is further or priority
     /// higher than the existing error.
     #[inline(always)]
-    pub fn err(&self, error: E)
-    where
-        E: std::fmt::Debug,
-    {
+    pub fn err(&self, error: E) {
         if self.errs_locked.get() {
             return;
         }
@@ -229,10 +226,7 @@ impl<'p, C, E> ParserContext<'p, C, E> {
     }
 
     /// Move the primary error into the recovered errors list.
-    pub fn recover_err(&self)
-    where
-        E: std::fmt::Debug,
-    {
+    pub fn recover_err(&self) {
         if let Some(err) = unsafe { std::mem::take(&mut *self.err.get()) } {
             let range = self.err_range();
             self.deepest_err.set(self.cursor());
