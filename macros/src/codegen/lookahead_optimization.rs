@@ -17,7 +17,7 @@ pub enum NextChar {
 }
 
 pub fn generate_lookahead_table(
-    choices: &Vec<Vec<Pattern>>,
+    choices: &[Vec<Pattern>],
     state: &CodegenState,
     capture: bool,
 ) -> syn::Result<TokenStream> {
@@ -111,7 +111,7 @@ fn resolve_lookaheads(
     let mut seen = HashSet::new();
     let mut chars = HashSet::new();
 
-    let mut stack: Vec<_> = lookaheads.iter().cloned().collect();
+    let mut stack: Vec<_> = lookaheads.to_vec();
 
     while let Some(lookahead) = stack.pop() {
         match lookahead {
@@ -183,8 +183,8 @@ fn get_fragment_lookahead(fragment: &PatternFragment) -> Vec<NextChar> {
         PatternFragment::CharFilter(_) => vec![NextChar::Any],
         PatternFragment::ParserRef(ident) => vec![NextChar::ParserRef(ident.to_string())],
         PatternFragment::Ignore(inner) => get_pattern_lookahead(&inner.pattern),
-        PatternFragment::Span(inner) => get_pattern_list_lookahead(&inner),
-        PatternFragment::Nested(inner) => get_pattern_list_lookahead(&inner),
+        PatternFragment::Span(inner) => get_pattern_list_lookahead(inner),
+        PatternFragment::Nested(inner) => get_pattern_list_lookahead(inner),
         PatternFragment::Annotated(_) => vec![NextChar::Any],
         PatternFragment::AnyChar => vec![NextChar::Any],
     }

@@ -20,10 +20,10 @@ impl Display for ParserError {
             ParserError::ExpectedLiteral(lit, parser_name) => write!(
                 f,
                 "Expected '{lit}' while parsing {parser_name}",
-                lit = lit.replace("\n", "<newline>").replace("\t", "<tab>"),
-                parser_name = parser_name.replace("_", " ")
+                lit = lit.replace('\n', "<newline>").replace('\t', "<tab>"),
+                parser_name = parser_name.replace('_', " ")
             ),
-            ParserError::ExpectedToken(token) => write!(f, "Expected {}", token.replace("_", " ")),
+            ParserError::ExpectedToken(token) => write!(f, "Expected {}", token.replace('_', " ")),
             ParserError::UnexpectedToken => write!(f, "Unexpected token"),
             ParserError::UnmatchedDelimiter(delim) => write!(f, "Unmatched delimiter '{delim}'"),
         }

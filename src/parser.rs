@@ -2,7 +2,7 @@ use std::{cell::UnsafeCell, marker::PhantomData};
 
 use crate::{context::ParserContext, ParserError, Recoverable};
 
-pub struct AppendCell<T> {
+pub(crate) struct AppendCell<T> {
     inner: UnsafeCell<Vec<T>>,
 }
 
@@ -15,16 +15,8 @@ impl<T> Default for AppendCell<T> {
 }
 
 impl<T> AppendCell<T> {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
     pub fn append(&self, item: T) {
         unsafe { (*self.inner.get()).push(item) }
-    }
-
-    pub fn extend(&self, items: impl IntoIterator<Item = T>) {
-        unsafe { (*self.inner.get()).extend(items) }
     }
 
     pub fn into_inner(self) -> Vec<T> {
@@ -196,7 +188,6 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
             }
 
             let mut distance = 0;
-            println!("Errs locked");
             let _lock = ctx.lock_errors();
             ctx.reset(ctx.deepest_err_pos().max(ctx.cursor()));
             while distance < max_distance
@@ -211,7 +202,6 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
                     if !CONSUME {
                         ctx.reset(cursor_before);
                     }
-                    println!("Recovered at {}", ctx.cursor());
                     ctx.recover_err();
                     return Some(res.unwrap_or_else(|| T::error_value(start..ctx.cursor())));
                 }

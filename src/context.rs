@@ -36,7 +36,7 @@ pub struct ParserContext<'p, C, E> {
     /// The symbol forming a boundary for any recovery operation, usually a closing delimiter
     pub(crate) recover_terminator: Cell<Option<&'static str>>,
     /// Errors which have been recovered
-    pub recovered: AppendCell<(Range<usize>, E)>,
+    pub(crate) recovered: AppendCell<(Range<usize>, E)>,
     /// The parser input
     pub input: &'p str,
 }
@@ -77,7 +77,7 @@ impl<'p, C, E> ParserContext<'p, C, E> {
         let previous_value = self.errs_locked.get();
         self.errs_locked.set(true);
         ErrsLock {
-            ctx: &self,
+            ctx: self,
             previous_value,
         }
     }
@@ -273,7 +273,7 @@ impl<'p, C, E> ParserContext<'p, C, E> {
     }
 }
 
-pub struct ErrsLock<'a, C, E> {
+pub(crate) struct ErrsLock<'a, C, E> {
     ctx: &'a ParserContext<'a, C, E>,
     previous_value: bool,
 }
@@ -284,6 +284,7 @@ impl<'a, C, E> Drop for ErrsLock<'a, C, E> {
     }
 }
 
+/// Get the lines of a string, including a trailing blank line
 pub fn lines(s: &str) -> impl Iterator<Item = &str> {
     s.lines()
         .chain((s.ends_with('\n') || s.is_empty()).then_some(""))

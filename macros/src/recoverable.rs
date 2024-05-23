@@ -8,12 +8,10 @@ pub fn recover_enum(
     generics: &Generics,
 ) -> syn::Result<TokenStream> {
     let variant = data.variants.iter().find(|variant| {
-        variant.attrs.iter().any(|attr| {
-            attr.meta
-                .path()
-                .get_ident()
-                .is_some_and(|i| i.to_string() == "recover")
-        })
+        variant
+            .attrs
+            .iter()
+            .any(|attr| attr.meta.path().get_ident().is_some_and(|i| i == "recover"))
     });
     let Some(variant) = variant else {
         return Err(syn::Error::new_spanned(
