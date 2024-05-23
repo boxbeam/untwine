@@ -74,19 +74,23 @@ impl<'p, C, E> ParserContext<'p, C, E> {
     }
 
     pub(crate) fn lock_errors(&self) -> ErrsLock<C, E> {
+        let previous_value = self.errs_locked.get();
         self.errs_locked.set(true);
-        ErrsLock { ctx: &self }
+        ErrsLock {
+            ctx: &self,
+            previous_value,
+        }
     }
 
     /// Convert the outcome of the parsing operation into a `Result`. If any errors were
     /// recovered, or if the entire input was not consumed, parsing will be considered
     /// to have failed. All errors will be collected into a list that includes their position.
     pub fn result<T>(&mut self, success: Option<T>) -> Result<T, Vec<(Range<usize>, E)>> {
-        if self.deepest_err_pos().max(self.deepest_recovered_err_pos()) > self.cursor()
-            || self.cursor() < self.input.len()
-            || self.recovered_count() > 0
-        {
+        if self.deepest_err_pos() > self.cursor() || self.cursor() < self.input.len() {
             return Err(self.take_errs());
+        }
+        if self.recovered_count() > 0 {
+            return Err(self.take_recovered_errors());
         }
         let Some(val) = success else {
             return Err(self.take_errs());
@@ -164,7 +168,10 @@ impl<'p, C, E> ParserContext<'p, C, E> {
     /// Overwrite the error stored in the context, if the position is further or priority
     /// higher than the existing error.
     #[inline(always)]
-    pub fn err(&self, error: E) {
+    pub fn err(&self, error: E)
+    where
+        E: std::fmt::Debug,
+    {
         if self.errs_locked.get() {
             return;
         }
@@ -222,7 +229,10 @@ impl<'p, C, E> ParserContext<'p, C, E> {
     }
 
     /// Move the primary error into the recovered errors list.
-    pub fn recover_err(&self) {
+    pub fn recover_err(&self)
+    where
+        E: std::fmt::Debug,
+    {
         if let Some(err) = unsafe { std::mem::take(&mut *self.err.get()) } {
             let range = self.err_range();
             self.deepest_err.set(self.cursor());
@@ -265,11 +275,12 @@ impl<'p, C, E> ParserContext<'p, C, E> {
 
 pub struct ErrsLock<'a, C, E> {
     ctx: &'a ParserContext<'a, C, E>,
+    previous_value: bool,
 }
 
 impl<'a, C, E> Drop for ErrsLock<'a, C, E> {
     fn drop(&mut self) {
-        self.ctx.errs_locked.set(false);
+        self.ctx.errs_locked.set(self.previous_value);
     }
 }
 

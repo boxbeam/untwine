@@ -185,18 +185,20 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
         T: Recoverable,
         V: 'p,
         Self: Sized + 'p,
+        E: std::fmt::Debug,
     {
         parser(move |ctx| {
             ctx.slice();
             let start = ctx.cursor();
             let res = self.parse(ctx);
-            if res.is_some() && ctx.deepest_err_pos() <= ctx.cursor() {
+            if res.is_some() || ctx.deepest_err_pos() <= ctx.cursor() {
                 return res;
             }
 
             let mut distance = 0;
+            println!("Errs locked");
             let _lock = ctx.lock_errors();
-            ctx.reset(ctx.deepest_err_pos());
+            ctx.reset(ctx.deepest_err_pos().max(ctx.cursor()));
             while distance < max_distance
                 && !ctx
                     .recover_terminator
@@ -209,6 +211,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
                     if !CONSUME {
                         ctx.reset(cursor_before);
                     }
+                    println!("Recovered at {}", ctx.cursor());
                     ctx.recover_err();
                     return Some(res.unwrap_or_else(|| T::error_value(start..ctx.cursor())));
                 }
@@ -238,14 +241,14 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
     where
         Self: Sized + 'p,
         T: Recoverable,
-        E: From<ParserError>,
+        E: From<ParserError> + std::fmt::Debug,
     {
         parser(move |ctx| {
             let start = ctx.cursor();
             let parent_terminator = ctx.recover_terminator.get();
             ctx.recover_terminator.set(Some(close));
             let res = self.parse(ctx);
-            if res.is_some() || ctx.deepest_err_pos() - ctx.cursor() <= open.len() {
+            if res.is_some() && ctx.cursor() - start >= open.len() {
                 ctx.recover_terminator.set(parent_terminator);
                 return res;
             }
@@ -278,6 +281,7 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
             }
 
             ctx.reset(start);
+            ctx.recover_terminator.set(parent_terminator);
             if ctx.err_range().start != start {
                 ctx.add_recovered_err(start..start, ParserError::UnmatchedDelimiter(open).into());
             }

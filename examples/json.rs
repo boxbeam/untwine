@@ -48,7 +48,7 @@ parser! {
     str: "\"" chars=str_char* "\"" -> JSONValue { JSONValue::String(chars.into_iter().collect()) }
     null: "null" -> JSONValue { JSONValue::Null }
     bool: bool=<"true" | "false"> -> JSONValue { JSONValue::Bool(bool == "true") }
-    list: "[" sep values=json_value$comma* sep "]" -> JSONValue { JSONValue::List(values) }
+    list: "[" sep values=(#[dbg] json_value)$comma* sep "]" -> JSONValue { JSONValue::List(values) }
     map_entry: key=str sep ":" sep value=json_value -> (String, JSONValue) { (key.string().unwrap(), value) }
     map: "{" sep values=map_entry$comma* sep "}" -> JSONValue { JSONValue::Map(values.into_iter().collect()) }
     pub json_value = (bool | null | str | float | int | map | list) -> JSONValue;
