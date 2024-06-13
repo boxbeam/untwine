@@ -518,10 +518,10 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 /// - `(pattern_a | pattern_b)` - Can chain as many patterns as desired together. The resulting parser will try parsing using each of them, in the order specified. Each pattern used must have the same type.
 /// - `pattern_a pattern_b` - Parse two patterns in sequence. The output type will be `(A, B)` for the corresponding types `A` and `B` for the patterns. Units will not be included in this output.
 /// - Modifiers
-///   - `pattern+` - Modifies a pattern to make it repeat as many times as possible, at least once. Returns a [Vec] of the modified pattern's type.
+///   - `pattern+` - Modifies a pattern to make it repeat as many times as possible, at least once. Returns a [Vec](std::collections::Vec) of the modified pattern's type.
 ///   - `pattern*` - Similar to the above, but allows zero matches.
-///   - `pattern?` - Parses the pattern optionally. Returns an [Option] of the modified pattern's type.
-///   - `pattern$delimiter+` - Parses a list of `pattern` delimited by `delimiter`, requiring at least one value. Returns a [Vec] of `pattern`'s output type. The delimiter's output is ignored.
+///   - `pattern?` - Parses the pattern optionally. Returns an [Option](std::option::Option) of the modified pattern's type.
+///   - `pattern$delimiter+` - Parses a list of `pattern` delimited by `delimiter`, requiring at least one value. Returns a [Vec](std::collections::Vec) of `pattern`'s output type. The delimiter's output is ignored.
 ///   - `pattern$delimiter*` - Similar to the above, but allows zero matches.
 ///   - `#pattern` - Ignores the output of the modified pattern, making it return `()`.
 ///   - `#[dbg] pattern` - Print the debug output of the pattern after parsing.

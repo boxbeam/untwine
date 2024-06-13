@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     pretty::{pretty_error, PrettyOptions},
-    AppendCell,
+    AppendCell, ParserError,
 };
 
 #[derive(Debug)]
@@ -85,7 +85,10 @@ impl<'p, C, E> ParserContext<'p, C, E> {
     /// Convert the outcome of the parsing operation into a `Result`. If any errors were
     /// recovered, or if the entire input was not consumed, parsing will be considered
     /// to have failed. All errors will be collected into a list that includes their position.
-    pub fn result<T>(&mut self, success: Option<T>) -> Result<T, Vec<(Range<usize>, E)>> {
+    pub fn result<T>(&mut self, success: Option<T>) -> Result<T, Vec<(Range<usize>, E)>>
+    where
+        E: From<ParserError>,
+    {
         if self.deepest_err_pos() > self.cursor() || self.cursor() < self.input.len() {
             return Err(self.take_errs());
         }
@@ -107,7 +110,7 @@ impl<'p, C, E> ParserContext<'p, C, E> {
         options: PrettyOptions,
     ) -> Result<T, String>
     where
-        E: Display,
+        E: Display + From<ParserError>,
     {
         self.result(success).map_err(|e| {
             let messages: Vec<_> = e
@@ -120,13 +123,22 @@ impl<'p, C, E> ParserContext<'p, C, E> {
     }
 
     /// Take all the errors (primary error and recovered errors) in the context.
-    pub fn take_errs(&mut self) -> Vec<(Range<usize>, E)> {
+    pub fn take_errs(&mut self) -> Vec<(Range<usize>, E)>
+    where
+        E: From<ParserError>,
+    {
         let mut errs = vec![];
         if let Some(err) = unsafe { std::mem::take(&mut *self.err.get()) } {
             errs.push((self.err_range(), err));
         }
         errs.extend(self.take_recovered_errors());
         errs.sort_by_key(|(range, _err)| range.start);
+        if errs.len() == 0 && self.cursor() < self.input.len() {
+            errs.push((
+                self.cursor()..self.cursor(),
+                ParserError::UnexpectedToken.into(),
+            ));
+        }
         errs
     }
 

@@ -1,3 +1,4 @@
+#![allow(unused)]
 use std::{ops::Range, rc::Rc};
 
 use untwine::{parser, parser_repl, prelude::Recoverable};
@@ -46,14 +47,4 @@ parser! {
 
 fn main() {
     parser_repl(expr);
-}
-
-parser! {
-    word:
-        chars=<'a'-'z'+>
-    -> String {
-        chars.into()
-    }
-
-    word_list = word$" "+ -> Vec<String>;
 }

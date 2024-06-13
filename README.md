@@ -16,7 +16,9 @@ Parsers made using untwine also have high-quality error messages visually displa
 
 ## Usage
 
-This readme will mostly cover examples and features. For full usage instructions, see https://docs.rs/untwine/latest/untwine/macro.parser.html.
+This readme will mostly cover examples and features. For a usage breakdown, see https://docs.rs/untwine/latest/untwine/macro.parser.html.
+
+For a more guided tutorial, see https://github.com/boxbeam/untwine/blob/master/TUTORIAL.md
 
 ## Simple, declarative parsing
 
