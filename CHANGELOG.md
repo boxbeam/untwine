@@ -1,3 +1,8 @@
+## 0.8.1
+
+- Fix issue with incomplete parses sometimes not generating any errors
+- Write tutorial
+
 ## 0.8.0
 
 - Fixed some strange error messages
