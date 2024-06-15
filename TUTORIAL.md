@@ -273,9 +273,7 @@ parser! {
 }
 ```
 
-Here, we use `'a'-'z'` to capture any lowercase alphabetic character (though `|c| c.is_ascii_lowercase()` would do the same) and `+` to parse it as many times as possible, requiring at least one match.
-
-Then we parse a comma optionally using `?`, and the entire pattern is captured as a single `&str` by `<>`.
+Here, we use `'a'-'z'` to capture any lowercase alphabetic character (though `|c| c.is_ascii_lowercase()` would do the same) and `+` to parse it as many times as possible, requiring at least one match. The entire pattern is then captured as a single `&str` by `<>`.
 
 Next, we can define a sentence as a list of words, separated by spaces and followed by a period.
 
