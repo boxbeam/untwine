@@ -62,7 +62,7 @@ fn boolean(ctx: &ParserContext) -> Option<bool> {
     .parse(ctx)?;
 
   Some(
-    || {
+    {
       value == "true"
     }
   )
