@@ -42,10 +42,10 @@ parser! {
     [error = ParseJSONError, recover = true]
     sep = #["\n\r\t "]*;
     comma = (sep "," sep);
-    int: num=<"-"? '0'-'9'+> -> JSONValue { JSONValue::Int(num.parse()?) }
+    int: num=<'-'? '0'-'9'+> -> JSONValue { JSONValue::Int(num.parse()?) }
     float: num=<"-"? '0'-'9'+ "." '0'-'9'+> -> JSONValue { JSONValue::Float(num.parse()?) }
     str_char = ("\\" . | [^"\""]) -> char;
-    str: "\"" chars=str_char* "\"" -> JSONValue { JSONValue::String(chars.into_iter().collect()) }
+    str: '"' chars=str_char*  '"' -> JSONValue { JSONValue::String(chars.into_iter().collect()) }
     null: "null" -> JSONValue { JSONValue::Null }
     bool: bool=<"true" | "false"> -> JSONValue { JSONValue::Bool(bool == "true") }
     list: "[" sep values=(json_value)$comma* sep "]" -> JSONValue { JSONValue::List(values) }

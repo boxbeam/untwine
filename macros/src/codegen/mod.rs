@@ -65,6 +65,12 @@ fn parse_fragment(
                 untwine::parsers::literal::<#data, #err>(#lit, #parser_name)
             }
         }
+        PatternFragment::LiteralChar(ch) => {
+            let c = ch.value().to_string();
+            quote! {
+                untwine::parsers::literal::<#data, #err>(#c, #parser_name)
+            }
+        }
         PatternFragment::CharRange(range) => {
             let inverted = range.inverted.then(|| quote! {!});
             let range_min = range.range.start();
@@ -132,12 +138,7 @@ fn parse_fragment(
 fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Result<TokenStream> {
     let mut fragment_parser = parse_fragment(&pattern.fragment, state, capture)?;
 
-    if !capture
-        && pattern
-            .modifier
-            .as_ref()
-            .is_some_and(|modifier| modifier.is_repeating())
-    {
+    if !capture {
         fragment_parser = quote! {#fragment_parser.ignore()};
     }
 
@@ -524,7 +525,7 @@ fn fragment_type(fragment: &PatternFragment, parser_types: &HashMap<String, Type
     let tokens = match fragment {
         P::Span(_) => quote! {&str},
         P::CharRange(_) | P::CharGroup(_) | P::AnyChar | P::CharFilter(_) => quote! {char},
-        P::Ignore(_) | P::Literal(_) => quote! {()},
+        P::Ignore(_) | P::Literal(_) | P::LiteralChar(_) => quote! {()},
         P::ParserRef(ident) => {
             let Some(typ) = parser_types.get(&ident.to_string()) else {
                 return Err(syn::Error::new_spanned(

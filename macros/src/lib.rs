@@ -200,6 +200,7 @@ impl Parse for TopLevelPatterns {
 #[derive(Debug, Clone)]
 pub(crate) enum PatternFragment {
     Literal(LitStr),
+    LiteralChar(LitChar),
     CharRange(CharRange),
     CharGroup(CharGroup),
     CharFilter(CharFilter),
@@ -213,8 +214,12 @@ pub(crate) enum PatternFragment {
 
 impl Parse for PatternFragment {
     fn parse(input: ParseStream) -> Result<Self> {
-        if input.peek(LitChar) || input.peek(Token![^]) {
+        if (input.peek(LitChar) && input.peek2(Token![-]) && !input.peek2(Token![->]))
+            || input.peek(Token![^])
+        {
             input.parse().map(PatternFragment::CharRange)
+        } else if input.peek(LitChar) {
+            input.parse().map(PatternFragment::LiteralChar)
         } else if input.peek(Bracket) {
             input.parse().map(PatternFragment::CharGroup)
         } else if input.peek(Brace) {
@@ -429,18 +434,6 @@ pub(crate) enum Modifier {
     OptionalDelimited(PatternFragment),
 }
 
-impl Modifier {
-    fn is_repeating(&self) -> bool {
-        match self {
-            Modifier::Optional => false,
-            Modifier::Repeating => true,
-            Modifier::OptionalRepeating => true,
-            Modifier::Delimited(_) => true,
-            Modifier::OptionalDelimited(_) => true,
-        }
-    }
-}
-
 impl Parse for Modifier {
     fn parse(input: ParseStream) -> Result<Self> {
         if input.parse::<Option<Token![+]>>()?.is_some() {
@@ -506,6 +499,7 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 ///
 /// ## Summary of pattern syntax
 /// - `"literal"` - Parses a string literal, and evaluates to `()` (since string literals are assumed to be structural and not desired in output).
+/// - `'c'` - Parses a character literal, and evaluates to `()`
 /// - `'a'-'z'` - Parses characters within a range, equivalent to `'a'..='z'` in regular Rust. Evaluates to [char].
 /// - `^'a'-'z'` - Similar to the above, but parses a character not contained in the range.
 /// - `["abcd"]` - Match any character contained within the string literal. Evaluates to [char].

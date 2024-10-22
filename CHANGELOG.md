@@ -1,3 +1,9 @@
+## 0.8.2
+
+- Make all non-captured parsers use `.ignore()` to drop their outputs
+  - This makes it possible to do things such as `#(a | b)` where `a` and `b` have different types. Since the overall output is ignored, both their outputs will be ignored and the parsers do not have to have the same output type.
+- Added character literals like `'"'`
+
 ## 0.8.1
 
 - Fix issue with incomplete parses sometimes not generating any errors

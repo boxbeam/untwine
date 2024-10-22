@@ -166,6 +166,7 @@ fn get_fragment_lookahead(fragment: &PatternFragment) -> Vec<NextChar> {
             .next()
             .map(NextChar::Char)
             .unwrap_or(NextChar::Any)],
+        PatternFragment::LiteralChar(ch) => vec![NextChar::Char(ch.value())],
         PatternFragment::CharRange(range) => {
             if range.inverted {
                 vec![NextChar::Any]

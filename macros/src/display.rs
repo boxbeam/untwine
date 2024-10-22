@@ -69,6 +69,7 @@ impl ToString for PatternFragment {
             PatternFragment::Nested(nested) => format!("({})", nested.to_string()),
             PatternFragment::Annotated(annotated) => annotated.pattern.to_string(),
             PatternFragment::AnyChar => ".".to_string(),
+            PatternFragment::LiteralChar(lit_char) => format!("'{}'", lit_char.value()),
         }
     }
 }
