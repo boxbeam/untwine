@@ -1,3 +1,8 @@
+## 0.8.3
+- Fix improper error reporting with lookahead optimization
+  - Could sometimes cause panics due to the start position of an error being ahead of the end position, causing an overflow in display code
+- Disable elided_named_lifetimes warning inside parser blocks
+
 ## 0.8.2
 
 - Make all non-captured parsers use `.ignore()` to drop their outputs
