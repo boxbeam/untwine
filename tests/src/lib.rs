@@ -160,4 +160,15 @@ mod tests {
         assert!(parse(paren, "(()))").is_err());
         assert!(parse(paren, "(()(()))()").is_ok());
     }
+
+    parser! {
+        pub optional_after_space = " "* ("?" | "!")$","+;
+    }
+
+    #[test]
+    fn test_optional_after_space() {
+        assert_snapshot!(
+            parse_pretty(optional_after_space, " ?,", PrettyOptions::no_color()).unwrap_err()
+        );
+    }
 }

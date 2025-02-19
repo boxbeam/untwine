@@ -289,9 +289,8 @@ fn parse_pattern_choices(
 
             #recover_end
 
-            if __start == #ctx.deepest_err_pos() {
-                #ctx.replace_err(ParserError::ExpectedToken(#name).into());
-            }
+            #ctx.replace_err(ParserError::ExpectedToken(#name).into());
+
             None
         })
     })
