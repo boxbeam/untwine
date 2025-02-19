@@ -475,6 +475,7 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
 
     Ok(quote! {
         mod #parser_name {
+            #![allow(elided_named_lifetimes)]
             use untwine::prelude::*;
             use super::*;
 
