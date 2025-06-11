@@ -7,7 +7,9 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 use syn::{Result, Type, Visibility};
 
-use crate::{Modifier, ParserBlock, ParserDef, Pattern, PatternFragment, PatternList};
+use crate::{
+    Modifier, ParserBlock, ParserDef, ParserFunction, Pattern, PatternFragment, PatternList,
+};
 
 use self::lookahead_optimization::{
     build_lookahead_map, generate_lookahead_optional, generate_lookahead_table, NextChar,
@@ -51,7 +53,7 @@ struct CodegenState {
     recover: bool,
 }
 
-fn parse_fragment(
+fn generate_fragment_parser(
     fragment: &PatternFragment,
     state: &CodegenState,
     capture: bool,
@@ -108,16 +110,16 @@ fn parse_fragment(
             }
         }
         PatternFragment::Ignore(pattern) => {
-            let parse_inner = parse_pattern(&pattern.pattern, state, false)?;
+            let parse_inner = generate_pattern_parser(&pattern.pattern, state, false)?;
             quote! { #parse_inner.ignore() }
         }
         PatternFragment::Span(span) => {
-            let parse_inner = parse_pattern_list(span, state, false)?;
+            let parse_inner = generate_pattern_list_parser(span, state, false)?;
             quote! {
                 #parse_inner.span()
             }
         }
-        PatternFragment::Nested(list) => parse_pattern_list(list, state, capture)?,
+        PatternFragment::Nested(list) => generate_pattern_list_parser(list, state, capture)?,
         PatternFragment::AnyChar => {
             quote! {char_filter::<#data, #err>(|_| true, "any character")}
         }
@@ -126,7 +128,7 @@ fn parse_fragment(
             let args = &attr.args;
             let pattern_string = attr.pattern.to_string();
             let parser_name = &state.parser_name;
-            let pattern = parse_pattern(&attr.pattern, state, capture)?;
+            let pattern = generate_pattern_parser(&attr.pattern, state, capture)?;
             quote! {
                 #path(#pattern, PatternMeta { parser_name: #parser_name, pattern_string: #pattern_string }, #(#args),*)
             }
@@ -135,8 +137,12 @@ fn parse_fragment(
     Ok(stream)
 }
 
-fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Result<TokenStream> {
-    let mut fragment_parser = parse_fragment(&pattern.fragment, state, capture)?;
+fn generate_pattern_parser(
+    pattern: &Pattern,
+    state: &CodegenState,
+    capture: bool,
+) -> Result<TokenStream> {
+    let mut fragment_parser = generate_fragment_parser(&pattern.fragment, state, capture)?;
 
     if !capture {
         fragment_parser = quote! {#fragment_parser.ignore()};
@@ -161,14 +167,14 @@ fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Resu
             }
         }
         Some(Modifier::Delimited(delimiter)) => {
-            let delimiter_parser = parse_fragment(delimiter, state, false)?;
+            let delimiter_parser = generate_fragment_parser(delimiter, state, false)?;
             let recovery = state
                 .recover
                 .then(|| quote! { .recover_to::<_, false>(#delimiter_parser, 150) });
             quote! {#fragment_parser #recovery .delimited::<_, true>(#delimiter_parser)}
         }
         Some(Modifier::OptionalDelimited(delimiter)) => {
-            let delimiter_parser = parse_fragment(delimiter, state, false)?;
+            let delimiter_parser = generate_fragment_parser(delimiter, state, false)?;
             let recovery = state
                 .recover
                 .then(|| quote! { .recover_to::<_, false>(#delimiter_parser, 150) });
@@ -183,30 +189,30 @@ fn parse_pattern(pattern: &Pattern, state: &CodegenState, capture: bool) -> Resu
     Ok(pattern_parser)
 }
 
-fn parse_pattern_list(
+fn generate_pattern_list_parser(
     patterns: &PatternList,
     state: &CodegenState,
     capture: bool,
 ) -> Result<TokenStream> {
     match patterns {
-        PatternList::List(list) => parse_patterns(list, state, capture),
+        PatternList::List(list) => generate_pattern_sequence_parser(list, state, capture),
         PatternList::Choices(choices) => {
             if state.lookahead_optimization {
                 generate_lookahead_table(choices, state, capture)
             } else {
-                parse_pattern_choices(choices, state, capture)
+                generate_pattern_choice_parser(choices, state, capture)
             }
         }
     }
 }
 
-fn parse_pattern_choices(
+fn generate_pattern_choice_parser(
     patterns: &[Vec<Pattern>],
     state: &CodegenState,
     capture: bool,
 ) -> Result<TokenStream> {
     if patterns.len() == 1 {
-        return parse_patterns(&patterns[0], state, capture);
+        return generate_pattern_sequence_parser(&patterns[0], state, capture);
     }
     let data = &state.data_type;
     let err = &state.error_type;
@@ -216,7 +222,7 @@ fn parse_pattern_choices(
     let mut parsers = vec![];
 
     for parser in patterns {
-        let parser = parse_patterns(parser, state, capture)?;
+        let parser = generate_pattern_sequence_parser(parser, state, capture)?;
 
         let ignore = (!capture).then(|| quote! {.ignore()});
 
@@ -296,19 +302,19 @@ fn parse_pattern_choices(
     })
 }
 
-fn parse_patterns(
+fn generate_pattern_sequence_parser(
     patterns: &[Pattern],
     state: &CodegenState,
     capture: bool,
 ) -> Result<TokenStream> {
     if patterns.len() == 1 {
-        return parse_pattern(&patterns[0], state, capture);
+        return generate_pattern_parser(&patterns[0], state, capture);
     }
 
     let mut parsers = vec![];
     let mut captured = vec![];
     for (i, pattern) in patterns.iter().enumerate() {
-        let parser = parse_pattern(pattern, state, capture)?;
+        let parser = generate_pattern_parser(pattern, state, capture)?;
         let ident = numbered_ident(i);
         let ctx = &state.parser_context_name;
         let priority_increase = parsers.len();
@@ -354,7 +360,7 @@ fn parse_patterns(
     })
 }
 
-fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<TokenStream> {
+fn generate_parser_function(parser: &ParserFunction, state: &CodegenState) -> Result<TokenStream> {
     let vis = &parser.vis;
     let name = &parser.name;
     let ctx = &state.parser_context_name;
@@ -370,7 +376,7 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
             .clone()
             .map(|ident| quote! {let #ident =})
             .unwrap_or_default();
-        let parser = parse_pattern(&pattern.pattern, state, pattern.label.is_some())?;
+        let parser = generate_pattern_parser(&pattern.pattern, state, pattern.label.is_some())?;
         let priority_increase = parsers.len();
 
         parsers.push(quote! {
@@ -424,7 +430,9 @@ fn generate_parser_function(parser: &ParserDef, state: &CodegenState) -> Result<
     })
 }
 
-pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
+pub fn generate_parser_block(block: ParserBlock<ParserDef>) -> Result<TokenStream> {
+    let block = block.into_functions();
+
     let parser_types = block
         .parsers
         .iter()
@@ -462,7 +470,7 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
     let mut parsers = vec![];
     let mut exports = vec![];
     for parser in block.parsers {
-        state.parser_name = parser.name.to_string();
+        state.parser_name = parser.error_name.clone();
         parsers.push(generate_parser_function(&parser, &state)?);
         if !matches!(parser.vis, Visibility::Inherited) {
             let vis = parser.vis;
@@ -489,7 +497,7 @@ pub fn generate_parser_block(block: ParserBlock) -> Result<TokenStream> {
     })
 }
 
-fn get_wrapped_parsers(parsers: &[ParserDef]) -> HashMap<String, (String, String)> {
+fn get_wrapped_parsers(parsers: &[ParserFunction]) -> HashMap<String, (String, String)> {
     let mut wrappers = HashMap::new();
 
     for parser in parsers {

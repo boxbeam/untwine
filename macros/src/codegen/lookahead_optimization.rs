@@ -4,7 +4,8 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use crate::{
-    codegen::parse_pattern_choices, Modifier, ParserBlock, Pattern, PatternFragment, PatternList,
+    codegen::generate_pattern_choice_parser, Modifier, ParserBlock, ParserFunction, Pattern,
+    PatternFragment, PatternList,
 };
 
 use super::CodegenState;
@@ -52,14 +53,18 @@ pub fn generate_lookahead_table(
             Some(c) => quote! { Some(#c) },
             None => quote! { None },
         });
-        parsers.push(parse_pattern_choices(&selected_choices, state, capture)?);
+        parsers.push(generate_pattern_choice_parser(
+            &selected_choices,
+            state,
+            capture,
+        )?);
     }
 
     let mut any_case: Vec<_> = map.get(&None).iter().flat_map(|v| v.iter()).collect();
     any_case.sort();
 
     let any_case: Vec<Vec<Pattern>> = any_case.into_iter().map(|i| choices[*i].clone()).collect();
-    let any_case = parse_pattern_choices(&any_case, state, capture)?;
+    let any_case = generate_pattern_choice_parser(&any_case, state, capture)?;
 
     let ctx = &state.parser_context_name;
     let data = &state.data_type;
@@ -133,7 +138,9 @@ fn resolve_lookaheads(
     chars.into_iter().collect()
 }
 
-pub fn build_lookahead_map(parsers: &ParserBlock) -> HashMap<String, Vec<NextChar>> {
+pub fn build_lookahead_map(
+    parsers: &ParserBlock<ParserFunction>,
+) -> HashMap<String, Vec<NextChar>> {
     parsers
         .parsers
         .iter()

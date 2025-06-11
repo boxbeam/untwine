@@ -9,7 +9,7 @@ use syn::{
     parse::{discouraged::Speculative, Parse, ParseStream},
     parse_macro_input,
     token::{Brace, Bracket, Paren},
-    Block, DeriveInput, Expr, Ident, LitBool, LitChar, LitStr, Path, Result, Token, Type,
+    Block, DeriveInput, Expr, Ident, LitBool, LitChar, LitStr, Path, Result, Stmt, Token, Type,
     Visibility,
 };
 
@@ -106,12 +106,27 @@ impl Parse for Header {
 }
 
 #[derive(Debug)]
-pub(crate) struct ParserBlock {
+pub(crate) struct ParserBlock<Stage> {
     header: Header,
-    parsers: Vec<ParserDef>,
+    parsers: Vec<Stage>,
 }
 
-impl Parse for ParserBlock {
+impl ParserBlock<ParserDef> {
+    fn into_functions(self) -> ParserBlock<ParserFunction> {
+        let functions = self
+            .parsers
+            .into_iter()
+            .flat_map(ParserDef::into_functions)
+            .collect();
+
+        ParserBlock {
+            header: self.header,
+            parsers: functions,
+        }
+    }
+}
+
+impl Parse for ParserBlock<ParserDef> {
     fn parse(input: ParseStream) -> Result<Self> {
         let block = ParserBlock {
             header: input.parse()?,
@@ -125,9 +140,148 @@ impl Parse for ParserBlock {
 pub(crate) struct ParserDef {
     vis: Visibility,
     name: Ident,
+    patterns: ParserType,
+    return_type: Type,
+}
+
+impl ParserDef {
+    fn into_functions(self) -> Vec<ParserFunction> {
+        match self.patterns {
+            ParserType::Regular(top_level_patterns, block) => vec![ParserFunction {
+                vis: self.vis,
+                error_name: self.name.to_string(),
+                name: self.name,
+                patterns: top_level_patterns,
+                return_type: self.return_type,
+                block,
+            }],
+            ParserType::Match(parser_match) => {
+                parser_match.into_functions(&self.vis, &self.name, &self.return_type)
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum ParserType {
+    Regular(TopLevelPatterns, Block),
+    Match(ParserMatch),
+}
+
+#[derive(Debug)]
+pub(crate) struct ParserMatchArm {
+    patterns: TopLevelPatterns,
+    expr: Expr,
+}
+
+impl Parse for ParserMatchArm {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let patterns = input.parse()?;
+        let _ = input.parse::<Token![=>]>()?;
+        let expr = input.parse()?;
+        Ok(ParserMatchArm { patterns, expr })
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ParserMatch {
+    arms: Vec<ParserMatchArm>,
+}
+
+pub(crate) struct ParserFunction {
+    vis: Visibility,
+    name: Ident,
+    error_name: String,
     patterns: TopLevelPatterns,
     return_type: Type,
     block: Block,
+}
+
+impl ParserMatch {
+    fn into_functions(
+        self,
+        vis: &Visibility,
+        parser_name: &Ident,
+        return_type: &Type,
+    ) -> Vec<ParserFunction> {
+        let mut parsers = vec![];
+        let mut names: Vec<Ident> = vec![];
+
+        for (i, arm) in self.arms.into_iter().enumerate() {
+            let name = Ident::new(&format!("__{parser_name}_match_arm_{i}"), Span::call_site());
+            names.push(name.clone());
+
+            let parser = ParserFunction {
+                vis: Visibility::Inherited,
+                error_name: parser_name.to_string(),
+                name,
+                patterns: arm.patterns,
+                return_type: return_type.clone(),
+                block: Block {
+                    brace_token: Brace::default(),
+                    stmts: vec![Stmt::Expr(arm.expr, None)],
+                },
+            };
+            parsers.push(parser);
+        }
+
+        let choices = names
+            .into_iter()
+            .map(|name| {
+                vec![Pattern {
+                    modifier: None,
+                    fragment: PatternFragment::ParserRef(name.clone()),
+                }]
+            })
+            .collect();
+
+        let named_rule = ParserFunction {
+            vis: vis.clone(),
+            error_name: parser_name.to_string(),
+            name: parser_name.clone(),
+            patterns: TopLevelPatterns {
+                patterns: vec![LabeledPattern {
+                    label: Some(parser_name.clone()),
+                    pattern: Pattern {
+                        fragment: PatternFragment::Nested(PatternList::Choices(choices)),
+                        modifier: None,
+                    },
+                }],
+            },
+            return_type: return_type.clone(),
+            block: syn::parse(quote! { { #parser_name } }.into()).unwrap(),
+        };
+        parsers.push(named_rule);
+
+        parsers
+    }
+}
+
+impl Parse for ParserMatch {
+    fn parse(input: ParseStream) -> Result<Self> {
+        input.parse::<Token![match]>()?;
+
+        let block;
+        braced!(block in input);
+
+        let mut arms = vec![];
+        arms.push(block.parse()?);
+        while block.peek(Token![,]) {
+            block.parse::<Token![,]>()?;
+            if !block.is_empty() {
+                arms.push(block.parse()?);
+            }
+        }
+        Ok(ParserMatch { arms })
+    }
+}
+
+fn parse_return_type(input: &ParseStream) -> Result<Type> {
+    if input.parse::<Token![->]>().is_ok() {
+        input.parse()
+    } else {
+        syn::parse::<Type>(quote! {()}.into())
+    }
 }
 
 impl Parse for ParserDef {
@@ -138,12 +292,22 @@ impl Parse for ParserDef {
             .parse::<Token![:]>()
             .map(|_| true)
             .or_else(|_| input.parse::<Token![=]>().map(|_| false))?;
+
+        if !colon && input.peek(Token![match]) {
+            let match_stmt: ParserMatch = input.parse()?;
+            let return_type = parse_return_type(&input)?;
+            input.parse::<Token![;]>()?;
+
+            return Ok(ParserDef {
+                vis,
+                name,
+                patterns: ParserType::Match(match_stmt),
+                return_type,
+            });
+        }
+
         let mut patterns: TopLevelPatterns = input.parse()?;
-        let return_type: Type = if input.parse::<Token![->]>().is_ok() {
-            input.parse()?
-        } else {
-            syn::parse(quote! {()}.into())?
-        };
+        let return_type = parse_return_type(&input)?;
 
         let block = if colon {
             input.parse()?
@@ -175,9 +339,8 @@ impl Parse for ParserDef {
         Ok(ParserDef {
             vis,
             name,
-            patterns,
+            patterns: ParserType::Regular(patterns, block),
             return_type,
-            block,
         })
     }
 }
@@ -190,7 +353,7 @@ pub(crate) struct TopLevelPatterns {
 impl Parse for TopLevelPatterns {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut patterns = vec![];
-        while !input.peek(Token![->]) && !input.peek(Token![;]) {
+        while !input.peek(Token![->]) && !input.peek(Token![;]) && !input.peek(Token![=>]) {
             patterns.push(input.parse()?);
         }
         Ok(TopLevelPatterns { patterns })
@@ -391,7 +554,7 @@ pub(crate) struct LabeledPattern {
 impl Parse for LabeledPattern {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut label = None;
-        if input.peek2(Token![=]) {
+        if input.peek2(Token![=]) && !input.peek2(Token![=>]) {
             label = Some(input.parse()?);
             input.parse::<Token![=]>()?;
         }
@@ -585,7 +748,7 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 ///   - There is also a `#[recover_to_any(["a", "b"])]` attribute which allows recovering to one of multiple literals
 #[proc_macro]
 pub fn parser(input: TokenStream) -> TokenStream {
-    let block: ParserBlock = parse_macro_input!(input as ParserBlock);
+    let block: ParserBlock<ParserDef> = parse_macro_input!(input as ParserBlock<ParserDef>);
 
     match codegen::generate_parser_block(block) {
         Ok(stream) => stream.into(),
