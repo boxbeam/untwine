@@ -1,4 +1,4 @@
-use crate::{literal, parser, Parser, ParserError, Recoverable};
+use crate::{literal, parser, Parser, ParserError, Recoverable, Span};
 use std::fmt::Debug;
 
 /// Static data provided to parser attributes.
@@ -70,4 +70,23 @@ where
         }),
         150,
     )
+}
+
+/// Wrap the output data in a Span, which contains a range representing the portion of
+/// the input corresponding to the parsed data.
+pub fn span<'p, C, T, E>(
+    parser: impl Parser<'p, C, T, E> + 'p,
+    _meta: PatternMeta,
+) -> impl Parser<'p, C, Span<T>, E>
+where
+    C: 'p,
+    E: 'p,
+    T: 'p,
+{
+    crate::parser(move |ctx| {
+        let start = ctx.cursor();
+        let data = parser.parse(ctx)?;
+        let span = start..ctx.cursor();
+        Some(Span { span, data })
+    })
 }

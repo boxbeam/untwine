@@ -50,6 +50,22 @@ use prelude::*;
 use pretty::PrettyOptions;
 pub use recoverable::Recoverable;
 
+/// Represents data corresponding to a specific portion of a parsing input.
+pub struct Span<T = ()> {
+    pub span: Range<usize>,
+    pub data: T,
+}
+
+impl<T> Span<T> {
+    /// Convert the inner data using a mapping function
+    pub fn map<V>(self, f: impl FnOnce(T) -> V) -> Span<V> {
+        Span {
+            span: self.span,
+            data: f(self.data),
+        }
+    }
+}
+
 /// Parse a value with a parser function created by the [parser!] block.
 pub fn parse<C, T, E>(
     parser: impl for<'a> Fn(&'a ParserContext<'a, C, E>) -> Option<T>,
