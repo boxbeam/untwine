@@ -1,6 +1,6 @@
 use std::{error::Error, fmt::Display};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ParserError {
     /// Thrown when a literal substring is expected.
     ExpectedLiteral(&'static str, &'static str),

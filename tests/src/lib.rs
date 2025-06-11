@@ -9,7 +9,9 @@ mod tests {
     };
 
     use insta::assert_snapshot;
-    use untwine::{parse, parse_pretty, parser, prelude::Recoverable, pretty::PrettyOptions};
+    use untwine::{
+        parse, parse_pretty, parser, prelude::Recoverable, pretty::PrettyOptions, ParserError,
+    };
 
     parser! {
         num: num=<'0'-'9'+> -> u32 { num.parse().unwrap() }
@@ -171,6 +173,24 @@ mod tests {
     fn test_optional_after_space() {
         assert_snapshot!(
             parse_pretty(optional_after_space, " ?,", PrettyOptions::no_color()).unwrap_err()
+        );
+    }
+
+    parser! {
+        pub bool = match {
+            "true" => true,
+            "false" => false,
+        } -> bool;
+
+        pub empty_match = match {};
+    }
+
+    #[test]
+    fn test_match() {
+        assert_eq!(parse(bool, "true").unwrap(), true);
+        assert_eq!(
+            parse(empty_match, "").unwrap_err()[0].1,
+            ParserError::UnexpectedToken
         );
     }
 }
