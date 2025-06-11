@@ -64,13 +64,13 @@ fn generate_fragment_parser(
     let stream = match fragment {
         PatternFragment::Literal(lit) => {
             quote! {
-                untwine::parsers::literal::<#data, #err>(#lit, #parser_name)
+                ::untwine::parsers::literal::<#data, #err>(#lit, #parser_name)
             }
         }
         PatternFragment::LiteralChar(ch) => {
             let c = ch.value().to_string();
             quote! {
-                untwine::parsers::literal::<#data, #err>(#c, #parser_name)
+                ::untwine::parsers::literal::<#data, #err>(#c, #parser_name)
             }
         }
         PatternFragment::CharRange(range) => {
@@ -78,7 +78,7 @@ fn generate_fragment_parser(
             let range_min = range.range.start();
             let range_max = range.range.end();
             quote! {
-                untwine::parsers::char_filter::<#data, #err>(|c| #inverted (#range_min ..= #range_max).contains(c), #parser_name)
+                ::untwine::parsers::char_filter::<#data, #err>(|c| #inverted (#range_min ..= #range_max).contains(c), #parser_name)
             }
         }
         PatternFragment::CharGroup(group) => {
@@ -89,13 +89,13 @@ fn generate_fragment_parser(
             };
             let chars = &group.chars;
             quote! {
-                untwine::parsers::char_filter::<#data, #err>(|c| #inverted matches!(c, #(#chars)|*), #parser_name)
+                ::untwine::parsers::char_filter::<#data, #err>(|c| #inverted matches!(c, #(#chars)|*), #parser_name)
             }
         }
         PatternFragment::CharFilter(filter) => {
             let filter = &filter.expr;
             quote! {
-                untwine::parsers::char_filter::<#data, #err>(#filter, #parser_name)
+                ::untwine::parsers::char_filter::<#data, #err>(#filter, #parser_name)
             }
         }
         PatternFragment::ParserRef(parser) => {
@@ -106,7 +106,7 @@ fn generate_fragment_parser(
                 .map(|(open, close)| quote! { .recover_wrapped(#open, #close, 1000) });
 
             quote! {
-                untwine::parser::parser::<#data, _, #err>(|ctx| #parser(ctx)) #recovery
+                ::untwine::parser::parser::<#data, _, #err>(|ctx| #parser(ctx)) #recovery
             }
         }
         PatternFragment::Ignore(pattern) => {
@@ -286,7 +286,7 @@ fn generate_pattern_choice_parser(
     });
 
     Ok(quote! {
-        untwine::parser::parser::<#data, _, #err>(|#ctx| {
+        ::untwine::parser::parser::<#data, _, #err>(|#ctx| {
             let __start = #ctx.cursor();
 
             #recover_start
@@ -347,7 +347,7 @@ fn generate_pattern_sequence_parser(
     let data = &state.data_type;
     let ctx = &state.parser_context_name;
     Ok(quote! {
-        untwine::parser::parser::<#data, _, #err>(|#ctx| {
+        ::untwine::parser::parser::<#data, _, #err>(|#ctx| {
             let __start = #ctx.cursor();
             let __err_priority = #ctx.get_err_priority();
             #(
@@ -484,7 +484,7 @@ pub fn generate_parser_block(block: ParserBlock<ParserDef>) -> Result<TokenStrea
     Ok(quote! {
         mod #parser_name {
             #![allow(elided_named_lifetimes)]
-            use untwine::prelude::*;
+            use ::untwine::prelude::*;
             use super::*;
 
             #(
