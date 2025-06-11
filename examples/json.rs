@@ -36,21 +36,46 @@ enum ParseJSONError {
     ParseInt(#[from] ParseIntError),
     #[error("Failed to parse number: {0}")]
     ParseFloat(#[from] ParseFloatError),
+    #[error("Invalid hex code: {0}")]
+    InvalidHexCode(String),
 }
 
 parser! {
     [error = ParseJSONError, recover = true]
     sep = #["\n\r\t "]*;
     comma = (sep "," sep);
-    int: num=<'-'? '0'-'9'+> -> JSONValue { JSONValue::Int(num.parse()?) }
-    float: num=<"-"? '0'-'9'+ "." '0'-'9'+> -> JSONValue { JSONValue::Float(num.parse()?) }
-    str_char = ("\\" . | [^"\""]) -> char;
+
+    digit = '0'-'9' -> char;
+    int: num=<'-'? digit+> -> JSONValue { JSONValue::Int(num.parse()?) }
+    float: num=<"-"? digit+ "." digit+> -> JSONValue { JSONValue::Float(num.parse()?) }
+
+    hex = #{|c| c.is_digit(16)};
+    escape = match {
+        "n" => '\n',
+        "t" => '\t',
+        "r" => '\r',
+        "u" code=<hex hex hex hex> => {
+            char::from_u32(u32::from_str_radix(code, 16)?)
+                .ok_or_else(|| ParseJSONError::InvalidHexCode(code.to_string()))?
+        },
+    } -> char;
+
+    str_char = ("\\" escape | [^"\""]) -> char;
     str: '"' chars=str_char*  '"' -> JSONValue { JSONValue::String(chars.into_iter().collect()) }
+
     null: "null" -> JSONValue { JSONValue::Null }
-    bool: bool=<"true" | "false"> -> JSONValue { JSONValue::Bool(bool == "true") }
+
+    bool = match {
+        "true" => JSONValue::Bool(true),
+        "false" => JSONValue::Bool(false),
+    } -> JSONValue;
+
     list: "[" sep values=(json_value)$comma* sep "]" -> JSONValue { JSONValue::List(values) }
+
     map_entry: key=str sep ":" sep value=json_value -> (String, JSONValue) { (key.string().unwrap(), value) }
+
     map: "{" sep values=map_entry$comma* sep "}" -> JSONValue { JSONValue::Map(values.into_iter().collect()) }
+
     pub json_value = (bool | null | str | float | int | map | list) -> JSONValue;
 }
 
