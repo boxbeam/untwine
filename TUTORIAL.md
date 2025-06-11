@@ -190,6 +190,68 @@ So we essentially define an expression as a term followed by any number of opera
 
 This allows us to cleverly use `fold` to evaluate the expression, using `first` as the initial value and merging each subsequent value into it by applying the operator to it with the right-hand value.
 
+### Using matches
+
+While the above parser works perfectly fine, the definition of `boolean` is a bit awkward.
+This becomes especially awkward if you have more than two elements. Take the example of a weekday parser:
+
+```rust
+parser! {
+  weekday: day=<"monday" | "Monday" | "tuesday" | "Tuesday" | "wednesday" | "Wednesday" | "thursday" | "Thursday" | "friday" | "Friday" | "saturday" | "Saturday" | "sunday" | "Sunday">
+  -> Weekday {
+    match day {
+      "monday" | "Monday" => Weekday::Monday,
+      "tuesday" | "Tuesday" => Weekday::Tuesday,
+      "wednesday" | "Wednesday" => Weekday::Wednesday,
+      "thursday" | "Thursday" => Weekday::Thursday,
+      "friday" | "Friday" => Weekday::Friday,
+      "saturday" | "Saturday" => Weekday::Saturday,
+      "sunday" | "Sunday" => Weekday::Sunday,
+      _ => unreachable!()
+    }
+  }
+}
+```
+
+When matching against many values, it is tedious to have to capture a string, only to match against it again
+inside the parser body. It also makes it easy to miss a case without noticing, and having an "unreachable"
+case which will crash your program if an entry is forgotten is not ideal.
+
+To address this, an additional kind of parser was introduced to untwine: A match-type parser. These parsers
+function much like a regular match statement in rust, mapping patterns to expressions. Using this syntax,
+the same logic can be expressed much more simply:
+
+```rust
+parser! {
+  weekday = match {
+      ("monday" | "Monday") => Weekday::Monday,
+      ("tuesday" | "Tuesday") => Weekday::Tuesday,
+      ("wednesday" | "Wednesday") => Weekday::Wednesday,
+      ("thursday" | "Thursday") => Weekday::Thursday,
+      ("friday" | "Friday") => Weekday::Friday,
+      ("saturday" | "Saturday") => Weekday::Saturday,
+      ("sunday" | "Sunday") => Weekday::Sunday,
+  } -> Weekday;
+}
+```
+
+Note the `()` around each pattern is only required due to using a choice between two strings. This is because
+these are actually top-level patterns using the same format as a regular parser, meaning you can capture
+values directly into variables which are used in your expression:
+
+```rs
+parser! {
+  value = match {
+    "bool " b=boolean => Value::Boolean(b),
+    "int " i=int => Value::Int(i),
+  } -> Value;
+}
+```
+
+This syntax is extremely useful for creating parsers which have many different structures that evaluate to the same type.
+However, these match statements can only be used top-level, to prevent the syntactic clutter of nesting a match statement inside
+the definition of another parser.
+
 ### Running your parsers
 
 Notice that the `expr` parser has `pub` in front of it. This means it will be accessible outside the parser block, and generally means it makes sense as an "entry point". A single parser block may have multiple exported parsers, as this can often be useful for debugging.
@@ -227,11 +289,10 @@ Now we can insert this rule in between all our tokens to allow whitespace:
 parser! {
   sep = #{|c| c.is_ascii_whitespace()}*;
 
-  boolean:
-    value=<"true" | "false">
-  -> bool {
-      value == "true"
-  }
+  boolean = match {
+    "true" => true,
+    "false" => false,
+  } -> bool;
 
   negation: "!" sep value=term -> bool {
     !value

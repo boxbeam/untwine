@@ -715,6 +715,20 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 /// use a semicolon instead of a function body. If the output type is `()`, the `-> ReturnType` can also be omitted,
 /// allowing structural rules like whitespace to be defined simply, like `sep = {char::is_whitespace}*;`.
 ///
+/// ### Match parsers
+/// Another special syntax allowed by parsers is a match statement, which can only be used as a top-level rule:
+/// ```ignore
+/// parser! {
+///     boolean = match {
+///         "true" => true,
+///         "false" => false,
+///     } -> bool;
+/// }
+/// ```
+/// These parsers will return the expression corresponding to the first pattern which succeeded.
+/// Since each arm is treated as a top-level pattern, you may use captures (name=) within them to
+/// extract values for the expressions.
+///
 /// ## Configuring a parser block
 /// There are some values that can be adjusted to change the behavior of a parser.
 /// These arguments are specified inside `[]` prior to defining any parsers:
