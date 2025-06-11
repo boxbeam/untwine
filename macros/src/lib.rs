@@ -265,6 +265,27 @@ impl Parse for ParserMatch {
         braced!(block in input);
 
         let mut arms = vec![];
+
+        if block.is_empty() {
+            return Ok(ParserMatch {
+                arms: vec![ParserMatchArm {
+                    patterns: TopLevelPatterns {
+                        patterns: vec![LabeledPattern {
+                            label: None,
+                            pattern: Pattern {
+                                fragment: PatternFragment::Literal(syn::parse(quote! {""}.into())?),
+                                modifier: None,
+                            },
+                        }],
+                    },
+                    expr: syn::parse(
+                        quote! { Err(::untwine::error::ParserError::UnexpectedToken.into())? }
+                            .into(),
+                    )?,
+                }],
+            });
+        }
+
         arms.push(block.parse()?);
         while block.peek(Token![,]) {
             block.parse::<Token![,]>()?;
