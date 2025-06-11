@@ -11,9 +11,10 @@ fn operate(first: bool, op: char, second: bool) -> bool {
 parser! {
     sep = #{|c| c.is_ascii_whitespace()}*;
 
-    boolean: value=<"true" | "false"> -> bool {
-        value == "true"
-    }
+    boolean = match {
+        "true" => true,
+        "false" => false,
+    } -> bool;
 
     negation: "!" sep value=term -> bool {
         !value
