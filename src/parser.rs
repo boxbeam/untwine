@@ -137,8 +137,8 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
                     return Some(elems);
                 }
                 let Some(elem) = self.parse(ctx) else {
-                    ctx.set_err_start(delim_start);
-                    return None;
+                    ctx.reset(delim_start);
+                    return Some(elems);
                 };
                 elems.push(elem);
                 delim_start = ctx.cursor();
