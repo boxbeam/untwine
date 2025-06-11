@@ -1,3 +1,15 @@
+## 0.9.0
+- Add support for match-type parsers (https://github.com/boxbeam/untwine/blob/master/TUTORIAL.md#using-matches)
+  - This allows much more concise and intuitive representations for parsers which have many different structures evaluating to the same type
+- Make delimited lists less greedy
+  - Previously, if a delimiter was found when parsing a delimited list, it would attempt to parse another element and error if it fails
+  - Delimited lists will now consider parsing successful and return what was parsed if there is no element following the delimiter
+  - This is useful for structures which allow optional (or required) trailing delimiters, such as `1, 2, 3,`
+  - The above can now be expressed like `num$","+ ","?` instead of `num ("," num)* ","?`
+    - This also allows you to get a `Vec<T>` instead of a `(T, Vec<T>)`
+- Add `#[span]` decorator, which allows you to capture the portion of input corresponding to a parsed value
+- Update examples to reflect new ideal implementations of JSON and boolean expression parsers
+
 ## 0.8.3
 - Fix improper error reporting with lookahead optimization
   - Could sometimes cause panics due to the start position of an error being ahead of the end position, causing an overflow in display code
@@ -7,7 +19,7 @@
 
 - Make all non-captured parsers use `.ignore()` to drop their outputs
   - This makes it possible to do things such as `#(a | b)` where `a` and `b` have different types. Since the overall output is ignored, both their outputs will be ignored and the parsers do not have to have the same output type.
-- Added character literals like `'"'`
+- Add character literals like `'"'`
 
 ## 0.8.1
 
@@ -16,8 +28,8 @@
 
 ## 0.8.0
 
-- Fixed some strange error messages
-- Made AppendCell crate-private
+- Fixe some strange error messages
+- Make AppendCell crate-private
 
 ## 0.7.0 
 
