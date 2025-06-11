@@ -268,21 +268,10 @@ impl Parse for ParserMatch {
 
         if block.is_empty() {
             return Ok(ParserMatch {
-                arms: vec![ParserMatchArm {
-                    patterns: TopLevelPatterns {
-                        patterns: vec![LabeledPattern {
-                            label: None,
-                            pattern: Pattern {
-                                fragment: PatternFragment::Literal(syn::parse(quote! {""}.into())?),
-                                modifier: None,
-                            },
-                        }],
-                    },
-                    expr: syn::parse(
-                        quote! { Err(::untwine::error::ParserError::UnexpectedToken.into())? }
-                            .into(),
-                    )?,
-                }],
+                arms: vec![syn::parse(
+                    quote! { "" => Err(::untwine::error::ParserError::UnexpectedToken.into())? }
+                        .into(),
+                )?],
             });
         }
 
