@@ -1,5 +1,8 @@
 use crate::{literal, parser, Parser, ParserError, Recoverable, Span};
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+    ops::{Bound, RangeBounds},
+};
 
 /// Static data provided to parser attributes.
 pub struct PatternMeta {
@@ -121,4 +124,68 @@ where
     V: 'p,
 {
     parser.map(map_fn)
+}
+
+pub trait IntoCountBound {
+    fn into_range(self) -> impl RangeBounds<usize>;
+}
+
+impl IntoCountBound for usize {
+    fn into_range(self) -> impl RangeBounds<usize> {
+        self..=self
+    }
+}
+
+macro_rules! impl_into_range {
+    ($t:ty) => {
+        impl IntoCountBound for $t {
+            fn into_range(self) -> impl RangeBounds<usize> {
+                self
+            }
+        }
+    };
+}
+
+impl_into_range!(std::ops::Range<usize>);
+impl_into_range!(std::ops::RangeTo<usize>);
+impl_into_range!(std::ops::RangeFull);
+impl_into_range!(std::ops::RangeFrom<usize>);
+impl_into_range!(std::ops::RangeToInclusive<usize>);
+impl_into_range!(std::ops::RangeInclusive<usize>);
+
+fn contains(end_bound: Bound<&usize>, elem: usize) -> bool {
+    match end_bound {
+        Bound::Included(&end) => elem <= end,
+        Bound::Excluded(&end) => elem < end,
+        Bound::Unbounded => true,
+    }
+}
+
+/// Attempts to match a pattern a specific number of times, and return a Vec.
+/// Can take either a usize or a range.
+pub fn repeat<'p, C, T, E>(
+    parser: impl Parser<'p, C, T, E> + 'p,
+    _meta: PatternMeta,
+    range: impl IntoCountBound + 'p,
+) -> impl Parser<'p, C, Vec<T>, E>
+where
+    C: 'p,
+    T: 'p,
+    E: 'p,
+{
+    let range = range.into_range();
+    crate::parser(move |ctx| {
+        let mut elems = vec![];
+        while contains(range.end_bound(), elems.len() + 1) {
+            match parser.parse(ctx) {
+                Some(elem) => elems.push(elem),
+                None => break,
+            }
+        }
+        if !range.contains(&elems.len()) {
+            None
+        } else {
+            Some(elems)
+        }
+    })
 }

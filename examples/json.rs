@@ -45,13 +45,14 @@ parser! {
         "n" => '\n',
         "t" => '\t',
         "r" => '\r',
-        "u" code=<hex hex hex hex> => {
+        "u" code=<#[repeat(4)] hex> => {
             char::from_u32(u32::from_str_radix(code, 16)?)
                 .ok_or_else(|| ParseJSONError::InvalidHexCode(code.to_string()))?
         },
+        c=[^"u"] => c,
     } -> char;
 
-    str_char = ("\\" escape | [^"\""]) -> char;
+    str_char = ("\\" escape | [^"\"\\"]) -> char;
     str: '"' chars=str_char*  '"' -> String { chars.into_iter().collect() }
 
     null: "null" -> JSONValue { JSONValue::Null }
