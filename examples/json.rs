@@ -34,7 +34,7 @@ enum ParseJSONError {
 parser! {
     [error = ParseJSONError, recover = true]
     sep = #["\n\r\t "]*;
-    comma = (sep "," sep);
+    comma = sep "," sep;
 
     digit = '0'-'9' -> char;
     int: num=<'-'? digit+> -> JSONValue { JSONValue::Int(num.parse()?) }
@@ -62,7 +62,7 @@ parser! {
         "false" => JSONValue::Bool(false),
     } -> JSONValue;
 
-    list: "[" sep values=(json_value)$comma* sep "]" -> JSONValue { JSONValue::List(values) }
+    list: "[" sep values=json_value$comma* sep "]" -> JSONValue { JSONValue::List(values) }
 
     map_entry: key=str sep ":" sep value=json_value -> (String, JSONValue) { (key, value) }
 
