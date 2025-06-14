@@ -176,7 +176,19 @@ mod tests {
         );
     }
 
+    #[derive(Debug, Eq, PartialEq)]
+    enum CustomError {
+        Untwine(ParserError),
+    }
+
+    impl From<ParserError> for CustomError {
+        fn from(value: ParserError) -> Self {
+            CustomError::Untwine(value)
+        }
+    }
+
     parser! {
+        [error = CustomError]
         pub bool = match {
             "true" => true,
             "false" => false,
@@ -190,7 +202,7 @@ mod tests {
         assert_eq!(parse(bool, "true").unwrap(), true);
         assert_eq!(
             parse(empty_match, "").unwrap_err()[0].1,
-            ParserError::UnexpectedToken
+            CustomError::Untwine(ParserError::UnexpectedToken)
         );
     }
 }
