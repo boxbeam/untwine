@@ -19,15 +19,6 @@ pub enum JSONValue {
     Error(Range<usize>),
 }
 
-impl JSONValue {
-    pub fn string(self) -> Option<String> {
-        match self {
-            JSONValue::String(s) => Some(s),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 enum ParseJSONError {
     #[error(transparent)]
@@ -61,7 +52,7 @@ parser! {
     } -> char;
 
     str_char = ("\\" escape | [^"\""]) -> char;
-    str: '"' chars=str_char*  '"' -> JSONValue { JSONValue::String(chars.into_iter().collect()) }
+    str: '"' chars=str_char*  '"' -> String { chars.into_iter().collect() }
 
     null: "null" -> JSONValue { JSONValue::Null }
 
@@ -72,11 +63,11 @@ parser! {
 
     list: "[" sep values=(json_value)$comma* sep "]" -> JSONValue { JSONValue::List(values) }
 
-    map_entry: key=str sep ":" sep value=json_value -> (String, JSONValue) { (key.string().unwrap(), value) }
+    map_entry: key=str sep ":" sep value=json_value -> (String, JSONValue) { (key, value) }
 
     map: "{" sep values=map_entry$comma* sep "}" -> JSONValue { JSONValue::Map(values.into_iter().collect()) }
 
-    pub json_value = (bool | null | str | float | int | map | list) -> JSONValue;
+    pub json_value = (bool | null | #[convert(JSONValue::String)] str | float | int | map | list) -> JSONValue;
 }
 
 fn main() {

@@ -90,3 +90,35 @@ where
         Some(Span { span, data })
     })
 }
+
+/// Map the output type of the parser using a mapping function.
+pub fn map<'p, C, T, E, V>(
+    parser: impl Parser<'p, C, T, E> + 'p,
+    _meta: PatternMeta,
+    map_fn: impl Fn(T) -> V + 'p,
+) -> impl Parser<'p, C, V, E>
+where
+    C: 'p,
+    T: 'p,
+    E: 'p,
+    V: 'p,
+{
+    parser.map(map_fn)
+}
+
+/// Map the output type of the parser using a mapping function.
+/// Identical to [map], but with a different name since `map` is
+/// a common name for a parser to have.
+pub fn convert<'p, C, T, E, V>(
+    parser: impl Parser<'p, C, T, E> + 'p,
+    _meta: PatternMeta,
+    map_fn: impl Fn(T) -> V + 'p,
+) -> impl Parser<'p, C, V, E>
+where
+    C: 'p,
+    T: 'p,
+    E: 'p,
+    V: 'p,
+{
+    parser.map(map_fn)
+}

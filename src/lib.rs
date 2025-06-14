@@ -23,7 +23,7 @@
 use std::{
     fmt::{Debug, Display},
     io::Write,
-    ops::Range,
+    ops::{Deref, DerefMut, Range},
 };
 
 pub mod error;
@@ -54,6 +54,20 @@ pub use recoverable::Recoverable;
 pub struct Span<T = ()> {
     pub span: Range<usize>,
     pub data: T,
+}
+
+impl<T> Deref for Span<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl<T> DerefMut for Span<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
 }
 
 impl<T> Span<T> {
