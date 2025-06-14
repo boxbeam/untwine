@@ -1,3 +1,6 @@
+## 0.9.3
+- Add `repeat` attribute, which accepts both `usize` and ranges, and matches a pattern within that range or exactly that number of times
+
 ## 0.9.2
 - Implement `Deref` and `DerefMut` for `Span`
 - Add attribute `map` and alias `convert`, which can be used like `#[map(map_fn)] pattern` to convert the output type of a parser
