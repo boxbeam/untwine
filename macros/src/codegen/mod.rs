@@ -483,7 +483,7 @@ pub fn generate_parser_block(block: ParserBlock<ParserDef>) -> Result<TokenStrea
 
     Ok(quote! {
         mod #parser_name {
-            #![allow(elided_named_lifetimes)]
+            #![allow(elided_named_lifetimes, unreachable_code)]
             use ::untwine::prelude::*;
             use super::*;
 

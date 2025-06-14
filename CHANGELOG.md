@@ -1,3 +1,6 @@
+## 0.9.1
+- Fix compiler error in empty match statement when error type is specified
+
 ## 0.9.0
 - Add support for match-type parsers (https://github.com/boxbeam/untwine/blob/master/TUTORIAL.md#using-matches)
   - This allows much more concise and intuitive representations for parsers which have many different structures evaluating to the same type
