@@ -269,7 +269,7 @@ impl Parse for ParserMatch {
         if block.is_empty() {
             return Ok(ParserMatch {
                 arms: vec![syn::parse(
-                    quote! { "" => Err(::untwine::error::ParserError::UnexpectedToken.into())? }
+                    quote! { "" => return Err(::untwine::error::ParserError::UnexpectedToken.into()) }
                         .into(),
                 )?],
             });
