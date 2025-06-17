@@ -1,4 +1,8 @@
 #![allow(unused)]
+#![feature(test)]
+
+mod benches;
+extern crate test;
 
 #[cfg(test)]
 mod tests {

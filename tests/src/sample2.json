@@ -1,0 +1,91 @@
+{
+    "shoppingList": {
+      "groceries": [
+        {
+          "item": "Apples",
+          "quantity": 3,
+          "unit": "lbs"
+        },
+        {
+            "item": "Grapes",
+            "quantity": 2,
+            "unit": "lbs"
+          },
+
+        {
+          "item": "Bread",
+          "quantity": 2,
+          "unit": "loaves"
+        },
+        {
+          "item": "Milk",
+          "quantity": 1,
+          "unit": "gallon"
+        },
+        {
+          "item": "Eggs",
+          "quantity": 1,
+          "unit": "dozen"
+        },
+        {
+          "item": "Chicken",
+          "quantity": 2,
+          "unit": "lbs"
+        },
+        {
+            "item": "Meat",
+            "quantity": 1,
+            "unit": "lbs"
+        },
+        {
+            "item": "Tomato",
+            "quantity": 2,
+            "unit": "lbs"
+        }
+      ],
+      "personalCare": [
+        {
+          "item": "Toothpaste",
+          "quantity": 2,
+          "unit": "packs"
+        },
+        {
+          "item": "Shampoo",
+          "quantity": 1,
+          "unit": "bottle"
+        },
+        {
+          "item": "Soap",
+          "quantity": 3,
+          "unit": "bars"
+        },
+        {
+          "item": "Toilet Paper",
+          "quantity": 1,
+          "unit": "pack"
+        }
+      ],
+      "householdItems": [
+        {
+          "item": "Paper Towels",
+          "quantity": 4,
+          "unit": "rolls"
+        },
+        {
+          "item": "Laundry Detergent",
+          "quantity": 1,
+          "unit": "container"
+        },
+        {
+          "item": "Trash Bags",
+          "quantity": 2,
+          "unit": "boxes"
+        },
+        {
+          "item": "Batteries",
+          "quantity": 1,
+          "unit": "pack"
+        }
+      ]
+    }
+}
