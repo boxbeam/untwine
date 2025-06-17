@@ -695,7 +695,8 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 ///     - The above syntax is not a special case, `untwine::attr::dbg` is its implementation. Any similar function can be used as an attribute.
 ///     - Additional parameters can be passed like `#[myattr(1, "hello")]`.
 ///   - `#[map(map_fn)] pattern` or `#[convert(map_fn)] pattern` - An attribute like the above, used to apply a mapping function to convert the output type of a parser, just like `.map(map_fn)` for iterators.
-///   - `#[repeat(n)]` or `#[repeat(start..=end)]` - An attribute which attempts to match a pattern a specific number of times in a row
+///   - `#[repeat(n)]` or `#[repeat(start..=end)]` - An attribute which attempts to match a pattern a specific number of times in a row.
+///   - `#[not] pattern` - Assert that the pattern is not present, this is useful for matching all characters up to a specific ending token since repeating patterns are always greedy.
 ///
 /// ## Using a parser
 /// Every parser specified is rewritten into a regular Rust function, which will parse all of the patterns specified and evaluate your block at the end.

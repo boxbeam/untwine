@@ -35,6 +35,30 @@ where
     })
 }
 
+/// Errors if the specified pattern is encountered, acting as a negative lookahead.
+/// This can be used to force a different branch to parse in case a certain pattern is encountered.
+pub fn not<'p, C, T, E>(
+    parser: impl Parser<'p, C, T, E> + 'p,
+    meta: PatternMeta,
+) -> impl Parser<'p, C, (), E>
+where
+    C: 'p,
+    T: 'p,
+    E: 'p + From<ParserError>,
+{
+    crate::parser(move |ctx| {
+        let start = ctx.cursor();
+        match parser.parse(ctx) {
+            Some(_) => {
+                ctx.err(ParserError::IllegalToken(meta.parser_name).into());
+                ctx.reset(start);
+                None
+            }
+            None => Some(()),
+        }
+    })
+}
+
 /// When the wrapped pattern fails to parse, try to jump ahead to a specific literal,
 /// but do not consume it. This allows you to specify an "anchor" from which parsing
 /// can continue.
