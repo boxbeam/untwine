@@ -416,7 +416,7 @@ fn generate_parser_function(parser: &ParserFunction, state: &CodegenState) -> Re
             )*
 
             #ctx.set_err_priority(__err_priority);
-            let res = (move || -> Result<#typ, #err> { Ok(#block) })();
+            let res = (move || -> Result<#typ, #err> { Ok({#block}) })();
             match res {
                 Ok(val) => Some(val),
                 Err(err) => {

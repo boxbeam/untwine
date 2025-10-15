@@ -744,7 +744,7 @@ fn optional<T: Parse>(input: ParseStream) -> Option<T> {
 /// Here are the available options:
 /// - `error = MyErrorType` - Use `MyErrorType` instead of `ParserError` as the error type for all parsers. `MyErrorType` must implement `From<ParserError>`.
 /// - `context = ctx_name` - Expose the `ParserContext` to the parser function bodies using the name specified.
-/// - `data_type = MyCustomContext` - Specify a custom context type which will be passed to all parser functions. It can be accessed using `.data()` or `.data_mut()` on the context argument.
+/// - `data = MyCustomContext` - Specify a custom context type which will be passed to all parser functions. It can be accessed using `.data()` or `.data_mut()` on the context argument.
 /// - `lookahead_optimization = false` - Disable the lookahead optimization, which is on by default. This optimization can improve parser performance by as much as double, but also inflates the size of the generated code, which may cause slower clean builds.
 /// - `recovery = true` - Enable automatic error recovery, which allows the parser to continue parsing after an operation fails, following specific rules. Read more below.
 ///
