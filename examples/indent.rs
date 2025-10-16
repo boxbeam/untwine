@@ -13,17 +13,18 @@ parser! {
         }
     }
 
-    increase_indent: -> () {
-        *ctx.data_mut() += 1;
-    }
-
-    decrease_indent: -> () {
-        *ctx.data_mut() -= 1;
-    }
-
     word = #'a'-'z'+;
-    block = word ":" ("\n" increase_indent (indent line)$"\n"+ decrease_indent)?;
-    line = (block | word);
+
+    block = word ":" ("\n" (indent line)$"\n"+)?;
+
+    indented_block: -> () {
+        *ctx.data_mut() += 1;
+        let ret = block(ctx);
+        *ctx.data_mut() -= 1;
+        return ctx.result_from(ret);
+    }
+
+    line = (indented_block | word);
     pub lines = line$"\n"+;
 }
 
@@ -31,7 +32,8 @@ const INPUT: &'static str = "
 a:
  b:
   c
-b";
+b:
+ c";
 
 fn main() {
     untwine::parse(lines, INPUT.trim()).unwrap();

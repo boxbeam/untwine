@@ -101,6 +101,13 @@ impl<'p, C, E> ParserContext<'p, C, E> {
         Ok(val)
     }
 
+    pub fn result_from<T>(&self, option: Option<T>) -> Result<T, E> {
+        option.ok_or_else(|| {
+            self.take_err()
+                .expect("Failed parsing operation should result in an error")
+        })
+    }
+
     /// Convert the output of the parsing operation into a `Result` with prettified error messages.
     /// If any errors were recovered, or if the entire input was not consumed, parsing will be
     /// considered to have failed.
