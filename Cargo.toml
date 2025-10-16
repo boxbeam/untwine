@@ -1,6 +1,6 @@
 [workspace]
 members = ["macros", "tests"] 
-package.version = "0.9.3"
+package.version = "0.9.4"
 
 [workspace.dependencies]
 thiserror = {version = "1.0.58"}

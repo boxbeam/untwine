@@ -1,3 +1,7 @@
+## 0.9.4
+- Fix lone statements in parser bodies causing syntax errors if not followed by a return value in the next line
+- Add example `indent` to demonstrate context-sensitive parsing
+
 ## 0.9.3
 - Add `repeat` attribute, which accepts both `usize` and ranges, and matches a pattern within that range or exactly that number of times
 
