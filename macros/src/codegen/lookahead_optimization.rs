@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{quote, ToTokens};
 
 use crate::{
     codegen::generate_pattern_choice_parser, Modifier, ParserBlock, ParserFunction, Pattern,
@@ -189,7 +189,9 @@ fn get_fragment_lookahead(fragment: &PatternFragment) -> Vec<NextChar> {
             }
         }
         PatternFragment::CharFilter(_) => vec![NextChar::Any],
-        PatternFragment::ParserRef(ident) => vec![NextChar::ParserRef(ident.to_string())],
+        PatternFragment::ParserRef(path) => {
+            vec![NextChar::ParserRef(path.into_token_stream().to_string())]
+        }
         PatternFragment::Ignore(inner) => get_pattern_lookahead(&inner.pattern),
         PatternFragment::Span(inner) => get_pattern_list_lookahead(inner),
         PatternFragment::Nested(inner) => get_pattern_list_lookahead(inner),

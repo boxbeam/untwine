@@ -1,5 +1,5 @@
 use crate::{Modifier, Pattern, PatternFragment, PatternList};
-use quote::quote;
+use quote::{quote, ToTokens};
 
 impl ToString for Pattern {
     fn to_string(&self) -> String {
@@ -63,7 +63,7 @@ impl ToString for PatternFragment {
                 let filter = &filter.expr;
                 format!("{{{:?}}}", quote! {#filter}.to_string())
             }
-            PatternFragment::ParserRef(ident) => ident.to_string(),
+            PatternFragment::ParserRef(path) => path.to_token_stream().to_string().to_string(),
             PatternFragment::Ignore(ignored) => format!("#{}", ignored.pattern.to_string()),
             PatternFragment::Span(span) => format!("<{}>", span.to_string()),
             PatternFragment::Nested(nested) => format!("({})", nested.to_string()),
