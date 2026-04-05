@@ -209,4 +209,13 @@ mod tests {
             CustomError::Untwine(ParserError::UnexpectedToken)
         );
     }
+
+    parser! {
+        pub external = '[' num_list ']' -> Vec<u32>;
+    }
+
+    #[test]
+    fn test_external_parser() {
+        assert_eq!(parse(external, "[1234,6521]").unwrap(), vec![1234, 6521]);
+    }
 }

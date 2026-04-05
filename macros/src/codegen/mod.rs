@@ -5,7 +5,7 @@ use std::{
 
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
-use syn::{Result, Type, Visibility};
+use syn::{parse::Parse, Result, Type, TypeInfer, Visibility};
 
 use crate::{
     Modifier, ParserBlock, ParserDef, ParserFunction, Pattern, PatternFragment, PatternList,
@@ -534,15 +534,10 @@ fn fragment_type(fragment: &PatternFragment, parser_types: &HashMap<String, Type
         P::Span(_) => quote! {&str},
         P::CharRange(_) | P::CharGroup(_) | P::AnyChar | P::CharFilter(_) => quote! {char},
         P::Ignore(_) | P::Literal(_) | P::LiteralChar(_) => quote! {()},
-        P::ParserRef(ident) => {
-            let Some(typ) = parser_types.get(&ident.to_string()) else {
-                return Err(syn::Error::new_spanned(
-                    ident,
-                    "Reference to undefined parser",
-                ));
-            };
-            return Ok(typ.clone());
-        }
+        P::ParserRef(ident) => match parser_types.get(&ident.to_string()) {
+            Some(typ) => return Ok(typ.clone()),
+            None => quote!(_),
+        },
         P::Nested(PatternList::List(l)) => return list_type(l, parser_types),
         P::Nested(PatternList::Choices(c)) => return list_type(&c[0], parser_types),
         P::Annotated(attr) => return pattern_type(&attr.pattern, parser_types),
