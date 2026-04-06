@@ -127,7 +127,11 @@ fn resolve_lookaheads(
                 if !seen.insert(name.clone()) {
                     continue;
                 }
-                stack.extend(parser_lookaheads[&name].iter().cloned());
+                if let Some(lookaheads) = parser_lookaheads.get(&name) {
+                    stack.extend(lookaheads.iter().cloned());
+                } else {
+                    stack.push(NextChar::Any);
+                }
             }
             NextChar::Any => {
                 chars.insert(None);
