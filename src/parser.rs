@@ -237,9 +237,9 @@ pub trait Parser<'p, C: 'p, T: 'p, E: 'p>: private::SealedParser<C, T, E> {
             let parent_terminator = ctx.recover_terminator.get();
             ctx.recover_terminator.set(Some(close));
             let res = self.parse(ctx);
-            if (res.is_some() && ctx.cursor() - start >= open.len())
-                || (res.is_none() && ctx.cursor() - start < open.len())
-            {
+            let parsed_length = ctx.cursor() - start;
+            let parsed_open_delim = parsed_length >= open.len();
+            if (res.is_some() && parsed_open_delim) || (res.is_none() && !parsed_open_delim) {
                 ctx.recover_terminator.set(parent_terminator);
                 return res;
             }
