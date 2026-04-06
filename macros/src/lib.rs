@@ -230,7 +230,7 @@ impl ParserMatch {
             .map(|name| {
                 vec![Pattern {
                     modifier: None,
-                    fragment: PatternFragment::ParserRef(name.clone()),
+                    fragment: PatternFragment::ParserRef(name.clone().into()),
                 }]
             })
             .collect();
@@ -377,7 +377,7 @@ pub(crate) enum PatternFragment {
     CharRange(CharRange),
     CharGroup(CharGroup),
     CharFilter(CharFilter),
-    ParserRef(Ident),
+    ParserRef(Path),
     Ignore(Box<IgnoredPattern>),
     Span(PatternList),
     Nested(PatternList),
@@ -425,8 +425,8 @@ impl Parse for PatternFragment {
             let patterns = input.parse()?;
             input.parse::<Token![>]>()?;
             Ok(PatternFragment::Span(patterns))
-        } else if input.peek(Ident) {
-            input.parse().map(PatternFragment::ParserRef)
+        } else if let Ok(path) = input.parse() {
+            Ok(PatternFragment::ParserRef(path))
         } else {
             Err(input.error("expected pattern fragment"))
         }

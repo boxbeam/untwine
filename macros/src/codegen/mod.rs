@@ -4,7 +4,7 @@ use std::{
 };
 
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::{Result, Type, Visibility};
 
 use crate::{
@@ -101,7 +101,7 @@ fn generate_fragment_parser(
         PatternFragment::ParserRef(parser) => {
             let recovery = state
                 .wrapped_parsers
-                .get(&parser.to_string())
+                .get(&parser.to_token_stream().to_string())
                 .filter(|_| state.recover)
                 .map(|(open, close)| quote! { .recover_wrapped(#open, #close, 1000) });
 
@@ -534,14 +534,13 @@ fn fragment_type(fragment: &PatternFragment, parser_types: &HashMap<String, Type
         P::Span(_) => quote! {&str},
         P::CharRange(_) | P::CharGroup(_) | P::AnyChar | P::CharFilter(_) => quote! {char},
         P::Ignore(_) | P::Literal(_) | P::LiteralChar(_) => quote! {()},
-        P::ParserRef(ident) => {
-            let Some(typ) = parser_types.get(&ident.to_string()) else {
-                return Err(syn::Error::new_spanned(
-                    ident,
-                    "Reference to undefined parser",
-                ));
-            };
-            return Ok(typ.clone());
+        P::ParserRef(path) => {
+            if let Some(ident) = path.get_ident() {
+                if let Some(typ) = parser_types.get(&ident.to_string()) {
+                    return Ok(typ.clone());
+                }
+            }
+            quote!(_)
         }
         P::Nested(PatternList::List(l)) => return list_type(l, parser_types),
         P::Nested(PatternList::Choices(c)) => return list_type(&c[0], parser_types),

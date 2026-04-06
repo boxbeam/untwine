@@ -209,4 +209,21 @@ mod tests {
             CustomError::Untwine(ParserError::UnexpectedToken)
         );
     }
+
+    mod parser_module {
+        use super::*;
+
+        parser! {
+            pub ident = <{|c| c.is_ascii_alphabetic()} {|c| c.is_ascii_alphanumeric()}*> -> &str;
+        }
+    }
+
+    parser! {
+        pub external: ident=parser_module::ident -> String { String::from(ident) }
+    }
+
+    #[test]
+    fn test_external_parser() {
+        assert_eq!(parse(external, "aaa").unwrap(), "aaa");
+    }
 }
