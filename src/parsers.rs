@@ -12,8 +12,8 @@ where
 {
     parser(move |ctx| {
         let matched = literal
-            .chars()
-            .zip(ctx.slice().chars())
+            .bytes()
+            .zip(ctx.slice().bytes())
             .take_while(|(a, b)| a == b)
             .count();
         ctx.advance(matched);
