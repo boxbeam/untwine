@@ -99,45 +99,58 @@ type ParserResult<T> = Option<(usize, T)>;
 type Context<'a, T> = &'a RefCell<T>;
 
 trait Chain {
-    type ChainLeft<A, B>;
-    type ChainRight<A, B>;
-    fn chain_left<A, B>(a: A, b: B) -> Self::ChainLeft<A, B>;
-    fn chain_right<A, B>(a: A, b: B) -> Self::ChainRight<A, B>;
+    type Output<A, B>;
+    type NextKind;
+
+    fn chain<A, B>(a: A, b: B) -> Self::Output<A, B>;
 }
 
-struct Ignore {}
+struct Ignore;
+struct Keep;
 
-impl Chain for Ignore {
-    type ChainLeft<A, B> = B;
-    type ChainRight<A, B> = A;
+struct ChainImpl<L, R> {
+    phantom: PhantomData<(L, R)>,
+}
 
-    fn chain_left<A, B>(a: A, b: B) -> Self::ChainLeft<A, B> {
-        b
+impl Chain for ChainImpl<Keep, Keep> {
+    type Output<A, B> = (A, B);
+    type NextKind = Keep;
+
+    fn chain<A, B>(a: A, b: B) -> Self::Output<A, B> {
+        (a, b)
     }
+}
 
-    fn chain_right<A, B>(a: A, b: B) -> Self::ChainRight<A, B> {
+impl Chain for ChainImpl<Keep, Ignore> {
+    type Output<A, B> = A;
+    type NextKind = Keep;
+
+    fn chain<A, B>(a: A, b: B) -> Self::Output<A, B> {
         a
     }
 }
 
-struct Combine;
+impl Chain for ChainImpl<Ignore, Keep> {
+    type Output<A, B> = B;
+    type NextKind = Keep;
 
-impl Chain for Combine {
-    type ChainLeft<A, B> = (A, B);
-    type ChainRight<A, B> = (A, B);
-
-    fn chain_left<A, B>(a: A, b: B) -> Self::ChainLeft<A, B> {
-        (a, b)
+    fn chain<A, B>(a: A, b: B) -> Self::Output<A, B> {
+        b
     }
+}
 
-    fn chain_right<A, B>(a: A, b: B) -> Self::ChainRight<A, B> {
-        (a, b)
+impl Chain for ChainImpl<Ignore, Ignore> {
+    type Output<A, B> = ();
+    type NextKind = Ignore;
+
+    fn chain<A, B>(a: A, b: B) -> Self::Output<A, B> {
+        ()
     }
 }
 
 pub trait Parser<Err, Ctx = ()> {
     type Output;
-    type Chain: Chain;
+    type Kind;
 
     fn parse(
         &mut self,
@@ -146,7 +159,7 @@ pub trait Parser<Err, Ctx = ()> {
         ctx: &RefCell<Ctx>,
     ) -> ParserResult<Self::Output>;
 
-    fn repeat(self) -> impl Parser<Err, Ctx, Output = Vec<Self::Output>, Chain = Self::Chain>
+    fn repeat(self) -> impl Parser<Err, Ctx, Output = Vec<Self::Output>, Kind = Self::Kind>
     where
         Self: Sized,
     {
@@ -158,7 +171,7 @@ pub trait Parser<Err, Ctx = ()> {
         where
             P: Parser<E, C>,
         {
-            type Chain = P::Chain;
+            type Kind = P::Kind;
             type Output = Vec<P::Output>;
             fn parse(
                 &mut self,
@@ -179,7 +192,7 @@ pub trait Parser<Err, Ctx = ()> {
         Repeat { p: self }
     }
 
-    fn or<P>(self, other: P) -> impl Parser<Err, Ctx, Output = Self::Output, Chain = Self::Chain>
+    fn or<P>(self, other: P) -> impl Parser<Err, Ctx, Output = Self::Output, Kind = Self::Kind>
     where
         Self: Sized,
         P: Parser<Err, Ctx, Output = Self::Output>,
@@ -194,7 +207,7 @@ pub trait Parser<Err, Ctx = ()> {
             P1: Parser<E, C, Output = P2::Output>,
             P2: Parser<E, C>,
         {
-            type Chain = P1::Chain;
+            type Kind = P1::Kind;
             type Output = P1::Output;
             fn parse(
                 &mut self,
@@ -222,7 +235,7 @@ pub trait Parser<Err, Ctx = ()> {
         Or { l: self, r: other }
     }
 
-    fn map<F, V>(self, f: F) -> impl Parser<Err, Ctx, Output = V, Chain = Self::Chain>
+    fn map<F, V>(self, f: F) -> impl Parser<Err, Ctx, Output = V, Kind = Self::Kind>
     where
         Self: Sized,
         F: Fn(Self::Output) -> V,
@@ -237,7 +250,7 @@ pub trait Parser<Err, Ctx = ()> {
             P: Parser<E, C>,
             F: Fn(P::Output) -> V,
         {
-            type Chain = P::Chain;
+            type Kind = P::Kind;
             type Output = V;
             fn parse(
                 &mut self,
@@ -254,7 +267,7 @@ pub trait Parser<Err, Ctx = ()> {
         Map { p: self, f }
     }
 
-    fn drop(self) -> impl Parser<Err, Ctx, Output = Self::Output, Chain = Ignore>
+    fn drop(self) -> impl Parser<Err, Ctx, Output = Self::Output, Kind = Ignore>
     where
         Self: Sized,
     {
@@ -266,7 +279,7 @@ pub trait Parser<Err, Ctx = ()> {
             P: Parser<E, C>,
         {
             type Output = P::Output;
-            type Chain = Ignore;
+            type Kind = Ignore;
 
             fn parse(
                 &mut self,
@@ -286,12 +299,13 @@ pub trait Parser<Err, Ctx = ()> {
     ) -> impl Parser<
         Err,
         Ctx,
-        Output = <Self::Chain as Chain>::ChainLeft<Self::Output, P::Output>,
-        Chain = P::Chain,
+        Output = <ChainImpl<Self::Kind, P::Kind> as Chain>::Output<Self::Output, P::Output>,
+        Kind = <ChainImpl<Self::Kind, P::Kind> as Chain>::NextKind,
     >
     where
         Self: Sized,
         P: Parser<Err, Ctx>,
+        ChainImpl<Self::Kind, P::Kind>: Chain,
     {
         struct Then<P1, P2> {
             l: P1,
@@ -302,9 +316,10 @@ pub trait Parser<Err, Ctx = ()> {
         where
             P1: Parser<E, C>,
             P2: Parser<E, C>,
+            ChainImpl<P1::Kind, P2::Kind>: Chain,
         {
-            type Chain = P2::Chain;
-            type Output = <P1::Chain as Chain>::ChainLeft<P1::Output, P2::Output>;
+            type Kind = <ChainImpl<P1::Kind, P2::Kind> as Chain>::NextKind;
+            type Output = <ChainImpl<P1::Kind, P2::Kind> as Chain>::Output<P1::Output, P2::Output>;
             fn parse(
                 &mut self,
                 input: Input,
@@ -322,7 +337,7 @@ pub trait Parser<Err, Ctx = ()> {
                     },
                     ctx,
                 )?;
-                let output = P1::Chain::chain_left(l_val, r_val);
+                let output = ChainImpl::<P1::Kind, P2::Kind>::chain(l_val, r_val);
                 Some((l_len + r_len, output))
             }
         }
@@ -334,13 +349,13 @@ pub trait Parser<Err, Ctx = ()> {
 fn lit(
     lit: &'static str,
     parser_name: &'static str,
-) -> impl Parser<ParserError, Output = (), Chain = Ignore> {
+) -> impl Parser<ParserError, Output = (), Kind = Ignore> {
     struct LitParser {
         lit: &'static str,
         parser_name: &'static str,
     }
     impl Parser<ParserError> for LitParser {
-        type Chain = Ignore;
+        type Kind = Ignore;
         type Output = ();
         fn parse(
             &mut self,
@@ -371,7 +386,7 @@ fn lit(
 fn char_filter(
     filter: impl Fn(char) -> bool,
     parser_name: &'static str,
-) -> impl Parser<ParserError, Output = char, Chain = Combine> {
+) -> impl Parser<ParserError, Output = char, Kind = Keep> {
     struct Filter<F> {
         f: F,
         parser_name: &'static str,
@@ -381,7 +396,7 @@ fn char_filter(
         F: Fn(char) -> bool,
     {
         type Output = char;
-        type Chain = Combine;
+        type Kind = Keep;
 
         fn parse(
             &mut self,
@@ -412,7 +427,7 @@ fn char_filter(
 struct int;
 impl Parser<ParserError, ()> for int {
     type Output = i32;
-    type Chain = Combine;
+    type Kind = Keep;
     fn parse(
         &mut self,
         input: Input,
@@ -434,7 +449,7 @@ impl Parser<ParserError, ()> for int {
 
 struct greeting;
 impl Parser<ParserError, ()> for greeting {
-    type Chain = Combine;
+    type Kind = Keep;
     type Output = ();
     fn parse(
         &mut self,
@@ -448,11 +463,14 @@ impl Parser<ParserError, ()> for greeting {
 
 #[test]
 fn thing() {
-    let input = "ab".into();
+    let input = "a1a2".into();
     let ctx = RefCell::new(());
-    let output = lit("a", "a")
-        .then(greeting)
-        .parse(input, DebugErrorHandler, &ctx);
+    let output =
+        lit("a", "a")
+            .then(int)
+            .then(lit("a", "a"))
+            .then(int)
+            .parse(input, DebugErrorHandler, &ctx);
     println!("{output:?}");
     panic!();
 }
