@@ -13,8 +13,24 @@ pub struct Input<'a> {
     cur: usize,
 }
 
-impl Input<'_> {
-    fn slice(&self) -> &str {
+pub struct Nop;
+
+impl<E, C> Parser<E, C> for Nop {
+    type Output<'a> = ();
+    type Kind = Ignore;
+
+    fn parse<'a>(
+        &mut self,
+        input: Input<'a>,
+        errs: impl ErrorHandler<E>,
+        ctx: &RefCell<C>,
+    ) -> ParserResult<Self::Output<'a>> {
+        Some((0, ()))
+    }
+}
+
+impl<'a> Input<'a> {
+    fn slice(&'a self) -> &'a str {
         &self.src[self.cur..]
     }
 }
@@ -98,17 +114,17 @@ where
 type ParserResult<T> = Option<(usize, T)>;
 type Context<'a, T> = &'a RefCell<T>;
 
-trait Chain {
+pub trait Chain {
     type Output<A, B>;
     type NextKind;
 
     fn chain<A, B>(a: A, b: B) -> Self::Output<A, B>;
 }
 
-struct Ignore;
-struct Keep;
+pub struct Ignore;
+pub struct Keep;
 
-struct ChainImpl<L, R> {
+pub struct ChainImpl<L, R> {
     phantom: PhantomData<(L, R)>,
 }
 
@@ -149,17 +165,35 @@ impl Chain for ChainImpl<Ignore, Ignore> {
 }
 
 pub trait Parser<Err, Ctx = ()> {
-    type Output;
+    type Output<'a>;
     type Kind;
 
-    fn parse(
+    fn parse<'a>(
         &mut self,
-        input: Input,
+        input: Input<'a>,
         errs: impl ErrorHandler<Err>,
         ctx: &RefCell<Ctx>,
-    ) -> ParserResult<Self::Output>;
+    ) -> ParserResult<Self::Output<'a>>;
 
-    fn repeat(self) -> impl Parser<Err, Ctx, Output = Vec<Self::Output>, Kind = Self::Kind>
+    fn try_match<'a>(
+        &mut self,
+        input: &'a str,
+    ) -> Result<Self::Output<'a>, Option<ErrorLocation<Err>>>
+    where
+        Ctx: Default,
+    {
+        let input = Input { src: input, cur: 0 };
+        let ctx = RefCell::new(Default::default());
+        let errs = ErrorCell::default();
+        match self.parse(input, &errs, &ctx) {
+            Some((_, e)) => Ok(e),
+            None => Err(errs.into_inner()),
+        }
+    }
+
+    fn repeat(
+        self,
+    ) -> impl for<'a> Parser<Err, Ctx, Output<'a> = Vec<Self::Output<'a>>, Kind = Self::Kind>
     where
         Self: Sized,
     {
@@ -172,13 +206,13 @@ pub trait Parser<Err, Ctx = ()> {
             P: Parser<E, C>,
         {
             type Kind = P::Kind;
-            type Output = Vec<P::Output>;
-            fn parse(
+            type Output<'a> = Vec<P::Output<'a>>;
+            fn parse<'a>(
                 &mut self,
-                input: Input,
+                input: Input<'a>,
                 errs: impl ErrorHandler<E>,
                 ctx: Context<C>,
-            ) -> ParserResult<Self::Output> {
+            ) -> ParserResult<Self::Output<'a>> {
                 let (mut offset, first) = self.p.parse(input, errs.clone(), ctx)?;
                 let mut elems = vec![first];
                 while let Some((len, elem)) = self.p.parse(input.skip(offset), errs.clone(), ctx) {
@@ -192,10 +226,13 @@ pub trait Parser<Err, Ctx = ()> {
         Repeat { p: self }
     }
 
-    fn or<P>(self, other: P) -> impl Parser<Err, Ctx, Output = Self::Output, Kind = Self::Kind>
+    fn or<P>(
+        self,
+        other: P,
+    ) -> impl for<'a> Parser<Err, Ctx, Output<'a> = Self::Output<'a>, Kind = Self::Kind>
     where
         Self: Sized,
-        P: Parser<Err, Ctx, Output = Self::Output>,
+        P: for<'a> Parser<Err, Ctx, Output<'a> = Self::Output<'a>>,
     {
         struct Or<P1, P2> {
             l: P1,
@@ -204,17 +241,17 @@ pub trait Parser<Err, Ctx = ()> {
 
         impl<P1, P2, E, C> Parser<E, C> for Or<P1, P2>
         where
-            P1: Parser<E, C, Output = P2::Output>,
+            P1: for<'a> Parser<E, C, Output<'a> = P2::Output<'a>>,
             P2: Parser<E, C>,
         {
             type Kind = P1::Kind;
-            type Output = P1::Output;
-            fn parse(
+            type Output<'a> = P1::Output<'a>;
+            fn parse<'a>(
                 &mut self,
-                input: Input,
+                input: Input<'a>,
                 errs: impl ErrorHandler<E>,
                 ctx: &RefCell<C>,
-            ) -> ParserResult<P1::Output> {
+            ) -> ParserResult<P1::Output<'a>> {
                 let err = ErrorCell::default();
                 let parsed = self.l.parse(input, &err, ctx);
                 if parsed.is_some() {
@@ -235,10 +272,10 @@ pub trait Parser<Err, Ctx = ()> {
         Or { l: self, r: other }
     }
 
-    fn map<F, V>(self, f: F) -> impl Parser<Err, Ctx, Output = V, Kind = Self::Kind>
+    fn map<F, V>(self, f: F) -> impl for<'a> Parser<Err, Ctx, Output<'a> = V, Kind = Self::Kind>
     where
         Self: Sized,
-        F: Fn(Self::Output) -> V,
+        F: for<'a> Fn(Self::Output<'a>) -> V,
     {
         struct Map<P, F> {
             p: P,
@@ -248,10 +285,10 @@ pub trait Parser<Err, Ctx = ()> {
         impl<P, F, V, E, C> Parser<E, C> for Map<P, F>
         where
             P: Parser<E, C>,
-            F: Fn(P::Output) -> V,
+            F: for<'a> Fn(P::Output<'a>) -> V,
         {
             type Kind = P::Kind;
-            type Output = V;
+            type Output<'a> = V;
             fn parse(
                 &mut self,
                 input: Input,
@@ -267,7 +304,81 @@ pub trait Parser<Err, Ctx = ()> {
         Map { p: self, f }
     }
 
-    fn drop(self) -> impl Parser<Err, Ctx, Output = Self::Output, Kind = Ignore>
+    fn try_map<F, V, E>(
+        self,
+        f: F,
+    ) -> impl for<'a> Parser<Err, Ctx, Output<'a> = V, Kind = Self::Kind>
+    where
+        Self: Sized,
+        F: for<'a> Fn(Self::Output<'a>) -> Result<V, E>,
+        E: Into<Err>,
+    {
+        struct TryMap<P, F> {
+            p: P,
+            f: F,
+        }
+
+        impl<P, F, V, E, E2, C> Parser<E, C> for TryMap<P, F>
+        where
+            P: Parser<E, C>,
+            F: for<'a> Fn(P::Output<'a>) -> Result<V, E2>,
+            E2: Into<E>,
+        {
+            type Kind = P::Kind;
+            type Output<'a> = V;
+            fn parse(
+                &mut self,
+                input: Input,
+                errs: impl ErrorHandler<E>,
+                ctx: &RefCell<C>,
+            ) -> ParserResult<V> {
+                let (len, result) = self.p.parse(input, errs.clone(), ctx)?;
+                let result = (self.f)(result);
+                match result {
+                    Ok(v) => Some((len, v)),
+                    Err(e) => {
+                        errs.error(e, input.cur..input.cur + len);
+                        None
+                    }
+                }
+            }
+        }
+
+        TryMap { p: self, f }
+    }
+    fn optional(
+        self,
+    ) -> impl for<'a> Parser<Err, Ctx, Output<'a> = Option<Self::Output<'a>>, Kind = Self::Kind>
+    where
+        Self: Sized,
+    {
+        struct Optional<P> {
+            p: P,
+        }
+        impl<P, Err, Ctx> Parser<Err, Ctx> for Optional<P>
+        where
+            P: Parser<Err, Ctx>,
+        {
+            type Output<'a> = Option<P::Output<'a>>;
+            type Kind = P::Kind;
+
+            fn parse<'a>(
+                &mut self,
+                input: Input<'a>,
+                errs: impl ErrorHandler<Err>,
+                ctx: &RefCell<Ctx>,
+            ) -> ParserResult<Self::Output<'a>> {
+                match self.p.parse(input, errs, ctx) {
+                    Some((len, elem)) => Some((len, Some(elem))),
+                    None => Some((0, None)),
+                }
+            }
+        }
+
+        Optional { p: self }
+    }
+
+    fn drop(self) -> impl for<'a> Parser<Err, Ctx, Output<'a> = Self::Output<'a>, Kind = Ignore>
     where
         Self: Sized,
     {
@@ -278,28 +389,59 @@ pub trait Parser<Err, Ctx = ()> {
         where
             P: Parser<E, C>,
         {
-            type Output = P::Output;
+            type Output<'a> = P::Output<'a>;
             type Kind = Ignore;
 
-            fn parse(
+            fn parse<'a>(
                 &mut self,
-                input: Input,
+                input: Input<'a>,
                 errs: impl ErrorHandler<E>,
                 ctx: &RefCell<C>,
-            ) -> ParserResult<Self::Output> {
+            ) -> ParserResult<Self::Output<'a>> {
                 self.p.parse(input, errs, ctx)
             }
         }
         Drop { p: self }
     }
 
+    fn slice(self) -> impl for<'a> Parser<Err, Ctx, Output<'a> = &'a str>
+    where
+        Self: Sized,
+    {
+        struct Slice<P> {
+            p: P,
+        }
+        impl<P, E, C> Parser<E, C> for Slice<P>
+        where
+            P: Parser<E, C>,
+        {
+            type Output<'a> = &'a str;
+            type Kind = Keep;
+
+            fn parse<'a>(
+                &mut self,
+                input: Input<'a>,
+                errs: impl ErrorHandler<E>,
+                ctx: &RefCell<C>,
+            ) -> ParserResult<Self::Output<'a>> {
+                let (len, _) = self.p.parse(input, errs, ctx)?;
+                let slice = &input.src[input.cur..input.cur + len];
+                Some((len, slice))
+            }
+        }
+        Slice { p: self }
+    }
+
     fn then<P>(
         self,
         other: P,
-    ) -> impl Parser<
+    ) -> impl for<'a> Parser<
         Err,
         Ctx,
-        Output = <ChainImpl<Self::Kind, P::Kind> as Chain>::Output<Self::Output, P::Output>,
+        Output<'a> = <ChainImpl<Self::Kind, P::Kind> as Chain>::Output<
+            Self::Output<'a>,
+            P::Output<'a>,
+        >,
         Kind = <ChainImpl<Self::Kind, P::Kind> as Chain>::NextKind,
     >
     where
@@ -319,13 +461,14 @@ pub trait Parser<Err, Ctx = ()> {
             ChainImpl<P1::Kind, P2::Kind>: Chain,
         {
             type Kind = <ChainImpl<P1::Kind, P2::Kind> as Chain>::NextKind;
-            type Output = <ChainImpl<P1::Kind, P2::Kind> as Chain>::Output<P1::Output, P2::Output>;
-            fn parse(
+            type Output<'a> =
+                <ChainImpl<P1::Kind, P2::Kind> as Chain>::Output<P1::Output<'a>, P2::Output<'a>>;
+            fn parse<'a>(
                 &mut self,
-                input: Input,
+                input: Input<'a>,
                 errs: impl ErrorHandler<E>,
                 ctx: &RefCell<C>,
-            ) -> ParserResult<Self::Output> {
+            ) -> ParserResult<Self::Output<'a>> {
                 let (l_len, l_val) = self.l.parse(input, errs.clone(), ctx)?;
                 let (r_len, r_val) = self.r.parse(
                     input.skip(l_len),
@@ -346,21 +489,27 @@ pub trait Parser<Err, Ctx = ()> {
     }
 }
 
-fn lit(
+fn lit<E>(
     lit: &'static str,
     parser_name: &'static str,
-) -> impl Parser<ParserError, Output = (), Kind = Ignore> {
+) -> impl for<'a> Parser<E, Output<'a> = (), Kind = Ignore>
+where
+    E: From<ParserError>,
+{
     struct LitParser {
         lit: &'static str,
         parser_name: &'static str,
     }
-    impl Parser<ParserError> for LitParser {
+    impl<E> Parser<E, ()> for LitParser
+    where
+        E: From<ParserError>,
+    {
         type Kind = Ignore;
-        type Output = ();
+        type Output<'a> = ();
         fn parse(
             &mut self,
             input: Input,
-            errs: impl ErrorHandler<ParserError>,
+            errs: impl ErrorHandler<E>,
             _ctx: Context<()>,
         ) -> ParserResult<()> {
             let num_matching = input
@@ -383,32 +532,36 @@ fn lit(
     LitParser { lit, parser_name }
 }
 
-fn char_filter(
+fn char_filter<E>(
     filter: impl Fn(char) -> bool,
     parser_name: &'static str,
-) -> impl Parser<ParserError, Output = char, Kind = Keep> {
+) -> impl for<'a> Parser<E, Output<'a> = char, Kind = Keep>
+where
+    E: From<ParserError>,
+{
     struct Filter<F> {
         f: F,
         parser_name: &'static str,
     }
-    impl<F, C> Parser<ParserError, C> for Filter<F>
+    impl<E, F, C> Parser<E, C> for Filter<F>
     where
         F: Fn(char) -> bool,
+        E: From<ParserError>,
     {
-        type Output = char;
+        type Output<'a> = char;
         type Kind = Keep;
 
         fn parse(
             &mut self,
             input: Input,
-            errs: impl ErrorHandler<ParserError>,
+            errs: impl ErrorHandler<E>,
             ctx: &RefCell<C>,
-        ) -> ParserResult<Self::Output> {
+        ) -> ParserResult<Self::Output<'_>> {
             let next_char = input.slice().chars().next();
             if let Some(c) = next_char
                 && (self.f)(c)
             {
-                todo!()
+                Some((c.len_utf8(), c))
             } else {
                 errs.error(
                     ParserError::ExpectedToken(self.parser_name),
@@ -424,16 +577,30 @@ fn char_filter(
     }
 }
 
+impl Parser<ParserError, ()> for &'static str {
+    type Output<'b> = ();
+    type Kind = Ignore;
+
+    fn parse<'a>(
+        &mut self,
+        input: Input<'a>,
+        errs: impl ErrorHandler<ParserError>,
+        ctx: &RefCell<()>,
+    ) -> ParserResult<Self::Output<'a>> {
+        lit(self, self).parse(input, errs, ctx)
+    }
+}
+
 struct int;
 impl Parser<ParserError, ()> for int {
-    type Output = i32;
+    type Output<'a> = i32;
     type Kind = Keep;
     fn parse(
         &mut self,
         input: Input,
         errs: impl ErrorHandler<ParserError>,
         ctx: &RefCell<()>,
-    ) -> ParserResult<Self::Output> {
+    ) -> ParserResult<Self::Output<'_>> {
         let bytes = input
             .slice()
             .chars()
@@ -447,30 +614,19 @@ impl Parser<ParserError, ()> for int {
     }
 }
 
-struct greeting;
-impl Parser<ParserError, ()> for greeting {
-    type Kind = Keep;
-    type Output = ();
-    fn parse(
-        &mut self,
-        input: Input,
-        errs: impl ErrorHandler<ParserError>,
-        ctx: &RefCell<()>,
-    ) -> ParserResult<()> {
-        todo!()
-    }
+#[macro_export]
+macro_rules! parsers {
+    () => {
+        Nop
+    };
+    ($val:expr $(, $($rest:tt),+ )?) => { $val.then(parsers!( $( $($rest),+ )? )) };
 }
 
 #[test]
 fn thing() {
-    let input = "a1a2".into();
-    let ctx = RefCell::new(());
-    let output =
-        lit("a", "a")
-            .then(int)
-            .then(lit("a", "a"))
-            .then(int)
-            .parse(input, DebugErrorHandler, &ctx);
+    let input = "a1a1a";
+    let mut parser = parsers!(int, int, "a", int, "a");
+    let output = parser.try_match(input);
     println!("{output:?}");
     panic!();
 }
