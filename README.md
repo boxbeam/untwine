@@ -1,6 +1,6 @@
 # Untwine
 
-The prettier pattern-matching parser with automatic error recovery
+🧪 PARSE LIKE PATTERN MATCHING, FREE OF SYN
 
 ![Example expression errors](./screenshots/json-3.png)
 
