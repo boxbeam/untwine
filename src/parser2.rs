@@ -23,7 +23,7 @@ impl<E, C> Parser<E, C> for Nop {
         &mut self,
         input: Input<'a>,
         errs: impl ErrorHandler<E>,
-        ctx: &RefCell<C>,
+        ctx: Context<C>,
     ) -> ParserResult<Self::Output<'a>> {
         Some((0, ()))
     }
@@ -104,15 +104,8 @@ impl<E> ErrorCell<E> {
     }
 }
 
-fn parser<P, T, C, E, I>()
-where
-    P: FnMut(Input, &RefCell<C>) -> Result<(usize, T), I>,
-    I: IntoIterator<Item = E>,
-{
-}
-
 type ParserResult<T> = Option<(usize, T)>;
-type Context<'a, T> = &'a RefCell<T>;
+type Context<'a, T> = &'a mut T;
 
 pub trait Chain {
     type Output<A, B>;
@@ -172,7 +165,7 @@ pub trait Parser<Err, Ctx = ()> {
         &mut self,
         input: Input<'a>,
         errs: impl ErrorHandler<Err>,
-        ctx: &RefCell<Ctx>,
+        ctx: Context<Ctx>,
     ) -> ParserResult<Self::Output<'a>>;
 
     fn try_match<'a>(
@@ -183,9 +176,9 @@ pub trait Parser<Err, Ctx = ()> {
         Ctx: Default,
     {
         let input = Input { src: input, cur: 0 };
-        let ctx = RefCell::new(Default::default());
+        let mut ctx = Default::default();
         let errs = ErrorCell::default();
-        match self.parse(input, &errs, &ctx) {
+        match self.parse(input, &errs, &mut ctx) {
             Some((_, e)) => Ok(e),
             None => Err(errs.into_inner()),
         }
@@ -250,7 +243,7 @@ pub trait Parser<Err, Ctx = ()> {
                 &mut self,
                 input: Input<'a>,
                 errs: impl ErrorHandler<E>,
-                ctx: &RefCell<C>,
+                ctx: Context<C>,
             ) -> ParserResult<P1::Output<'a>> {
                 let err = ErrorCell::default();
                 let parsed = self.l.parse(input, &err, ctx);
@@ -293,7 +286,7 @@ pub trait Parser<Err, Ctx = ()> {
                 &mut self,
                 input: Input,
                 errs: impl ErrorHandler<E>,
-                ctx: &RefCell<C>,
+                ctx: Context<C>,
             ) -> ParserResult<V> {
                 self.p
                     .parse(input, errs, ctx)
@@ -330,7 +323,7 @@ pub trait Parser<Err, Ctx = ()> {
                 &mut self,
                 input: Input,
                 errs: impl ErrorHandler<E>,
-                ctx: &RefCell<C>,
+                ctx: Context<C>,
             ) -> ParserResult<V> {
                 let (len, result) = self.p.parse(input, errs.clone(), ctx)?;
                 let result = (self.f)(result);
@@ -366,7 +359,7 @@ pub trait Parser<Err, Ctx = ()> {
                 &mut self,
                 input: Input<'a>,
                 errs: impl ErrorHandler<Err>,
-                ctx: &RefCell<Ctx>,
+                ctx: Context<Ctx>,
             ) -> ParserResult<Self::Output<'a>> {
                 match self.p.parse(input, errs, ctx) {
                     Some((len, elem)) => Some((len, Some(elem))),
@@ -396,7 +389,7 @@ pub trait Parser<Err, Ctx = ()> {
                 &mut self,
                 input: Input<'a>,
                 errs: impl ErrorHandler<E>,
-                ctx: &RefCell<C>,
+                ctx: Context<C>,
             ) -> ParserResult<Self::Output<'a>> {
                 self.p.parse(input, errs, ctx)
             }
@@ -422,7 +415,7 @@ pub trait Parser<Err, Ctx = ()> {
                 &mut self,
                 input: Input<'a>,
                 errs: impl ErrorHandler<E>,
-                ctx: &RefCell<C>,
+                ctx: Context<C>,
             ) -> ParserResult<Self::Output<'a>> {
                 let (len, _) = self.p.parse(input, errs, ctx)?;
                 let slice = &input.src[input.cur..input.cur + len];
@@ -467,7 +460,7 @@ pub trait Parser<Err, Ctx = ()> {
                 &mut self,
                 input: Input<'a>,
                 errs: impl ErrorHandler<E>,
-                ctx: &RefCell<C>,
+                ctx: Context<C>,
             ) -> ParserResult<Self::Output<'a>> {
                 let (l_len, l_val) = self.l.parse(input, errs.clone(), ctx)?;
                 let (r_len, r_val) = self.r.parse(
@@ -555,7 +548,7 @@ where
             &mut self,
             input: Input,
             errs: impl ErrorHandler<E>,
-            ctx: &RefCell<C>,
+            ctx: Context<C>,
         ) -> ParserResult<Self::Output<'_>> {
             let next_char = input.slice().chars().next();
             if let Some(c) = next_char
@@ -585,7 +578,7 @@ impl Parser<ParserError, ()> for &'static str {
         &mut self,
         input: Input<'a>,
         errs: impl ErrorHandler<ParserError>,
-        ctx: &RefCell<()>,
+        ctx: Context<()>,
     ) -> ParserResult<Self::Output<'a>> {
         lit(self, self).parse(input, errs, ctx)
     }
@@ -599,7 +592,7 @@ impl Parser<ParserError, ()> for int {
         &mut self,
         input: Input,
         errs: impl ErrorHandler<ParserError>,
-        ctx: &RefCell<()>,
+        ctx: Context<()>,
     ) -> ParserResult<Self::Output<'_>> {
         let bytes = input
             .slice()
