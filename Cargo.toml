@@ -1,11 +1,10 @@
 [workspace]
-members = ["macros", "macros2", "tests"] 
+members = ["macros", "tests"] 
 package.version = "0.9.4"
 
 [workspace.dependencies]
 thiserror = {version = "1.0.58"}
 macros = { package = "untwine_macros", path = "macros", version = "0.9.3" }
-macros2 = { package = "untwine_macros2", path = "macros2", version = "0.9.3" }
 
 [package]
 name = "untwine"
