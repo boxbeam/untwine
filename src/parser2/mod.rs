@@ -372,7 +372,7 @@ pub trait Parser<Err, Ctx = ()> {
         Optional { p: self }
     }
 
-    fn drop(self) -> impl for<'a> Parser<Err, Ctx, Output<'a> = Self::Output<'a>, Kind = Ignore>
+    fn drop(self) -> impl for<'a> Parser<Err, Ctx, Output<'a> = (), Kind = Ignore>
     where
         Self: Sized,
     {
@@ -383,7 +383,7 @@ pub trait Parser<Err, Ctx = ()> {
         where
             P: Parser<E, C>,
         {
-            type Output<'a> = P::Output<'a>;
+            type Output<'a> = ();
             type Kind = Ignore;
 
             fn parse<'a>(
@@ -392,7 +392,8 @@ pub trait Parser<Err, Ctx = ()> {
                 errs: impl ErrorHandler<E>,
                 ctx: Context<C>,
             ) -> ParserResult<Self::Output<'a>> {
-                self.p.parse(input, errs, ctx)
+                let (len, _) = self.p.parse(input, errs, ctx)?;
+                Some((len, ()))
             }
         }
         Drop { p: self }
@@ -481,12 +482,133 @@ pub trait Parser<Err, Ctx = ()> {
 
         Then { l: self, r: other }
     }
+
+    fn map_err<'a, E2, F>(
+        self,
+        f: F,
+    ) -> impl Parser<E2, Ctx, Output<'a> = Self::Output<'a>, Kind = Self::Kind>
+    where
+        Self: Sized,
+        F: Fn(Err) -> E2,
+    {
+        struct MapErr<P, F, E> {
+            p: P,
+            f: F,
+            phantom: PhantomData<E>,
+        }
+
+        impl<P, F, C, E, E2> Parser<E2, C> for MapErr<P, F, E>
+        where
+            P: Parser<E, C>,
+            F: Fn(E) -> E2,
+        {
+            type Output<'a> = P::Output<'a>;
+            type Kind = P::Kind;
+
+            fn parse<'a>(
+                &mut self,
+                input: Input<'a>,
+                errs: impl ErrorHandler<E2>,
+                ctx: Context<C>,
+            ) -> ParserResult<Self::Output<'a>> {
+                let handler = |err: E, loc| errs.error((self.f)(err), loc);
+                self.p.parse(input, &handler, ctx)
+            }
+        }
+
+        MapErr {
+            p: self,
+            f,
+            phantom: PhantomData,
+        }
+    }
+
+    fn with_context<'a, C>(
+        self,
+        ctx: Ctx,
+    ) -> impl Parser<Err, (), Output<'a> = Self::Output<'a>, Kind = Self::Kind>
+    where
+        Self: Sized,
+    {
+        struct WithContext<P, C> {
+            p: P,
+            c: C,
+        }
+
+        impl<P, E, C> Parser<E, ()> for WithContext<P, C>
+        where
+            P: Parser<E, C>,
+        {
+            type Output<'a> = P::Output<'a>;
+            type Kind = P::Kind;
+
+            fn parse<'a>(
+                &mut self,
+                input: Input<'a>,
+                errs: impl ErrorHandler<E>,
+                _ctx: Context<()>,
+            ) -> ParserResult<Self::Output<'a>> {
+                self.p.parse(input, errs, &mut self.c)
+            }
+        }
+
+        WithContext { p: self, c: ctx }
+    }
+
+    fn wrapped(
+        self,
+        before: &'static str,
+        after: &'static str,
+    ) -> impl for<'a> Parser<Err, Ctx, Output<'a> = Self::Output<'a>, Kind = Self::Kind>
+    where
+        Self: Sized,
+        Err: From<ParserError>,
+    {
+        struct Wrapped<P> {
+            p: P,
+            before: &'static str,
+            after: &'static str,
+        }
+
+        impl<P, E, C> Parser<E, C> for Wrapped<P>
+        where
+            P: Parser<E, C>,
+            E: From<ParserError>,
+        {
+            type Output<'a> = P::Output<'a>;
+            type Kind = P::Kind;
+
+            fn parse<'a>(
+                &mut self,
+                input: Input<'a>,
+                errs: impl ErrorHandler<E>,
+                ctx: Context<C>,
+            ) -> ParserResult<Self::Output<'a>> {
+                let errs_clone = errs.clone();
+                let handler = |e: ParserError, loc| errs_clone.error(E::from(e), loc);
+                Parser::parse(&mut self.before, input, &handler, &mut ())?;
+                let (len, val) = self.parse(input.skip(self.before.len()), errs, ctx)?;
+                Parser::parse(
+                    &mut self.after,
+                    input.skip(self.before.len() + len),
+                    &handler,
+                    &mut (),
+                )?;
+                Some((self.before.len() + self.after.len() + len, val))
+            }
+        }
+        Wrapped {
+            p: self,
+            before,
+            after,
+        }
+    }
 }
 
-fn lit<E>(
+fn lit<E, C>(
     lit: &'static str,
     parser_name: &'static str,
-) -> impl for<'a> Parser<E, Output<'a> = (), Kind = Ignore>
+) -> impl for<'a> Parser<E, C, Output<'a> = (), Kind = Ignore>
 where
     E: From<ParserError>,
 {
@@ -494,7 +616,7 @@ where
         lit: &'static str,
         parser_name: &'static str,
     }
-    impl<E> Parser<E, ()> for LitParser
+    impl<E, C> Parser<E, C> for LitParser
     where
         E: From<ParserError>,
     {
@@ -504,7 +626,7 @@ where
             &mut self,
             input: Input,
             errs: impl ErrorHandler<E>,
-            _ctx: Context<()>,
+            _ctx: Context<C>,
         ) -> ParserResult<()> {
             let num_matching = input
                 .slice()
@@ -571,8 +693,40 @@ where
     }
 }
 
-impl Parser<ParserError, ()> for &'static str {
+impl<C> Parser<ParserError, C> for &'static str {
     type Output<'b> = ();
+    type Kind = Ignore;
+
+    fn parse<'a>(
+        &mut self,
+        input: Input<'a>,
+        errs: impl ErrorHandler<ParserError>,
+        ctx: Context<C>,
+    ) -> ParserResult<Self::Output<'a>> {
+        lit(self, self).parse(input, errs, ctx)
+    }
+}
+
+impl<F> Parser<ParserError, ()> for F
+where
+    F: Fn(char) -> bool,
+{
+    type Output<'a> = char;
+    type Kind = Keep;
+
+    fn parse<'a>(
+        &mut self,
+        input: Input<'a>,
+        errs: impl ErrorHandler<ParserError>,
+        ctx: Context<()>,
+    ) -> ParserResult<Self::Output<'a>> {
+        let c = input.slice().chars().next().filter(|c| self(*c))?;
+        Some((c.len_utf8(), c))
+    }
+}
+
+impl Parser<ParserError, ()> for char {
+    type Output<'a> = ();
     type Kind = Ignore;
 
     fn parse<'a>(
@@ -581,7 +735,11 @@ impl Parser<ParserError, ()> for &'static str {
         errs: impl ErrorHandler<ParserError>,
         ctx: Context<()>,
     ) -> ParserResult<Self::Output<'a>> {
-        lit(self, self).parse(input, errs, ctx)
+        if input.slice().starts_with(*self) {
+            Some((self.len_utf8(), ()))
+        } else {
+            None
+        }
     }
 }
 
@@ -637,11 +795,11 @@ macro_rules! parsers_choice {
 }
 
 #[macro_export]
-macro_rules! parsers {
+macro_rules! p {
     ($val:expr) => {
         $val
     };
-    ($val:expr $(, $($rest:expr),+ )?) => { $val.then(parsers!( $( $($rest),+ )? )) };
+    ($val:expr $(, $($rest:expr),+ )?) => { $val.then(p!( $( $($rest),+ )? )) };
 }
 
 macro_rules! not_drop {
@@ -666,6 +824,15 @@ macro_rules! names_pattern {
     };
 }
 
+macro_rules! ret_type {
+    ($ty:ty) => {
+        $ty
+    };
+    () => {
+        ()
+    };
+}
+
 macro_rules! parser_fn {
     ($name:ident ($( $(@ $match_name:ident =)? $parser:expr),*) -> $ret:ty $block:block) => {
         #[allow(non_camel_case_types)]
@@ -681,20 +848,39 @@ macro_rules! parser_fn {
                 errs: impl ErrorHandler<ParserError>,
                 ctx: &mut (),
             ) -> ParserResult<$ret> {
-                let (__len, names_pattern!($( $($match_name,)? )*)) = parsers!($(not_drop!($parser $(, $match_name)?)),*).parse(input, errs, ctx)?;
+                let (__len, names_pattern!($( $($match_name,)? )*)) = p!($(not_drop!($parser $(, $match_name)?)),*).parse(input, errs, ctx)?;
                 Some((__len, $block))
             }
         }
     };
+    ($name:ident ($( $(@ $match_name:ident =)? $parser:expr),*) $(-> $ret:ty)?) => {
+        #[allow(non_camel_case_types)]
+        struct $name;
+
+        impl Parser<ParserError, ()> for $name {
+            type Output<'a> = ret_type!($($ret)?);
+            type Kind = Keep;
+
+            fn parse<'a>(
+                &mut self,
+                input: Input<'a>,
+                errs: impl ErrorHandler<ParserError>,
+                ctx: &mut (),
+            ) -> ParserResult<ret_type!($($ret)?)> {
+                let (__len, val) = p!($($parser),*).parse(input, errs, ctx)?;
+                Some((__len, val))
+            }
+        }
+    }
 }
 
 macro_rules! parser_fns {
-    ($($name:ident ($($tt:tt)*) -> $ret:ty $block:block $(;)?)* ) => { $( parser_fn!( $name ( $($tt)* ) -> $ret $block ); )+ };
+    ($($name:ident ($($tt:tt)*) $(-> $ret:ty)? $($block:block)? $(;)?)* ) => { $( parser_fn!( $name ( $($tt)* ) $(-> $ret)? $($block)? ); )+ };
 }
 
 macro_rules! parser_match {
     ( $( $($(@ $match_name:ident =)? $parser:expr),* => $val:expr ),+ $(,)?) => {
-        parsers_choice!( $( parsers!( $(not_drop!($parser $(, $match_name)?)),* ).map(|names_pattern!( $($($match_name,)?)? )| { $val } ) ),* )
+        parsers_choice!( $( p!( $(not_drop!($parser $(, $match_name)?)),* ).map(|names_pattern!( $($($match_name,)?)? )| { $val } ) ),* )
     };
 }
 
@@ -705,19 +891,20 @@ enum Op {
     Mul,
 }
 
+parser_fn!(sep(char::is_whitespace.rep().drop()));
+
 parser_fns! {
-    sep([' ', '\t', '\r']) -> () {}
 
-    op(@o=parser_match! {
-        "+" => Op::Add,
-        "-" => Op::Sub,
-        "/" => Op::Div,
-        "*" => Op::Mul,
-    }) -> Op {o}
+    op(parser_match! {
+        '+' => Op::Add,
+        '-' => Op::Sub,
+        '/' => Op::Div,
+        '*' => Op::Mul,
+    }) -> Op
 
-    term(@t=int.or("(".then(expr).then(")"))) -> i32 {t}
+    term(int.or(expr.wrapped("(", ")"))) -> i32
 
-    expr(@left=term, sep.opt(), @o=op, sep.opt(), @right=term) -> i32 {
+    expr(@left=term, sep, @o=op, sep, @right=term) -> i32 {
         match o {
             Op::Add => left + right,
             Op::Sub => left - right,
