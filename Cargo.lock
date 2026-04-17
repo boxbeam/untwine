@@ -189,6 +189,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
 
 [[package]]
+name = "macros2"
+version = "0.9.4"
+dependencies = [
+ "proc-macro2",
+ "untwine 0.9.4 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -246,9 +254,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.95"
+version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02b3e5e68a3a1a02aad3ec490a98007cbc13c37cbe84a3cd7b8e406d76e7f778"
+checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
 ]
@@ -369,7 +377,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.58",
- "untwine",
+ "untwine 0.9.4",
 ]
 
 [[package]]
@@ -434,13 +442,34 @@ checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
 name = "untwine"
 version = "0.9.4"
 dependencies = [
+ "proc-macro2",
  "thiserror 1.0.58",
- "untwine_macros",
+ "untwine_macros 0.9.4",
+]
+
+[[package]]
+name = "untwine"
+version = "0.9.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cf6da372149c806dd3a94520cb650342d74c19a3053613c54086207f2fcf5c3"
+dependencies = [
+ "untwine_macros 0.9.4 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "untwine_macros"
 version = "0.9.4"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "untwine_macros"
+version = "0.9.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91408aeeb53029f4b88f946bd6ab0ae39179ca4a35b0fac8f998f02f35e8c6f0"
 dependencies = [
  "proc-macro2",
  "quote",

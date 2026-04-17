@@ -32,7 +32,7 @@ pub use macros::parser;
 pub mod attr;
 pub mod context;
 pub mod parser;
-mod parser2;
+pub mod parser2;
 pub mod parsers;
 pub mod pretty;
 pub mod recoverable;
@@ -42,7 +42,7 @@ pub mod prelude {
     pub use attr::*;
     pub use context::ParserContext;
     pub use error::ParserError;
-    pub use macros::{parser, Recoverable};
+    pub use macros::{Recoverable, parser};
     pub use parser::*;
     pub use parsers::*;
 }

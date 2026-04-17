@@ -1,11 +1,11 @@
-use std::{
-    cell::{RefCell, UnsafeCell},
-    fmt::Debug,
-    marker::PhantomData,
-    ops::Range,
-};
+use std::{cell::UnsafeCell, fmt::Debug, marker::PhantomData, ops::Range};
 
 use crate::ParserError;
+
+pub trait Source {
+    type Input<'a>;
+    type Symbol;
+}
 
 #[derive(Clone, Copy)]
 pub struct Input<'a> {
@@ -184,7 +184,7 @@ pub trait Parser<Err, Ctx = ()> {
         }
     }
 
-    fn repeat(
+    fn rep(
         self,
     ) -> impl for<'a> Parser<Err, Ctx, Output<'a> = Vec<Self::Output<'a>>, Kind = Self::Kind>
     where
@@ -265,7 +265,7 @@ pub trait Parser<Err, Ctx = ()> {
         Or { l: self, r: other }
     }
 
-    fn map<F, V>(self, f: F) -> impl for<'a> Parser<Err, Ctx, Output<'a> = V, Kind = Self::Kind>
+    fn map<F, V>(self, f: F) -> impl for<'a> Parser<Err, Ctx, Output<'a> = V, Kind = Keep>
     where
         Self: Sized,
         F: for<'a> Fn(Self::Output<'a>) -> V,
@@ -280,7 +280,7 @@ pub trait Parser<Err, Ctx = ()> {
             P: Parser<E, C>,
             F: for<'a> Fn(P::Output<'a>) -> V,
         {
-            type Kind = P::Kind;
+            type Kind = Keep;
             type Output<'a> = V;
             fn parse(
                 &mut self,
@@ -339,7 +339,8 @@ pub trait Parser<Err, Ctx = ()> {
 
         TryMap { p: self, f }
     }
-    fn optional(
+
+    fn opt(
         self,
     ) -> impl for<'a> Parser<Err, Ctx, Output<'a> = Option<Self::Output<'a>>, Kind = Self::Kind>
     where
@@ -397,7 +398,7 @@ pub trait Parser<Err, Ctx = ()> {
         Drop { p: self }
     }
 
-    fn slice(self) -> impl for<'a> Parser<Err, Ctx, Output<'a> = &'a str>
+    fn slice(self) -> impl for<'a> Parser<Err, Ctx, Output<'a> = &'a str, Kind = Keep>
     where
         Self: Sized,
     {
@@ -607,19 +608,128 @@ impl Parser<ParserError, ()> for int {
     }
 }
 
+impl<const N: usize> Parser<ParserError, ()> for [char; N] {
+    type Output<'a> = char;
+    type Kind = Keep;
+
+    fn parse<'a>(
+        &mut self,
+        input: Input<'a>,
+        _errs: impl ErrorHandler<ParserError>,
+        _ctx: Context<()>,
+    ) -> ParserResult<Self::Output<'a>> {
+        let c = input.slice().chars().next();
+        if let Some(c) = c
+            && self.contains(&c)
+        {
+            Some((c.len_utf8(), c))
+        } else {
+            None
+        }
+    }
+}
+
+macro_rules! parsers_choice {
+    ($val:expr) => {
+        $val
+    };
+    ($val:expr $(, $($rest:expr),+ )?) => { $val.or(parsers_choice!( $( $($rest),+ )? )) };
+}
+
 #[macro_export]
 macro_rules! parsers {
-    () => {
-        Nop
+    ($val:expr) => {
+        $val
     };
-    ($val:expr $(, $($rest:tt),+ )?) => { $val.then(parsers!( $( $($rest),+ )? )) };
+    ($val:expr $(, $($rest:expr),+ )?) => { $val.then(parsers!( $( $($rest),+ )? )) };
+}
+
+macro_rules! not_drop {
+    ($parser:expr) => {
+        $parser.drop()
+    };
+    ($parser:expr, $name:ident) => {
+        $parser
+    };
+}
+
+macro_rules! names_pattern {
+    ($name:ident $(,)?) => {
+        $name
+    };
+    ($a:ident , $($rest:ident),+ $(,)?) => {
+        ($a, names_pattern!($($rest),+) , )
+    };
+    (,) => {};
+    () => {
+        _
+    };
+}
+
+macro_rules! parser_fn {
+    ($name:ident ($( $(@ $match_name:ident =)? $parser:expr),*) -> $ret:ty $block:block) => {
+        #[allow(non_camel_case_types)]
+        struct $name;
+
+        impl Parser<ParserError, ()> for $name {
+            type Output<'a> = $ret;
+            type Kind = Keep;
+
+            fn parse<'a>(
+                &mut self,
+                input: Input<'a>,
+                errs: impl ErrorHandler<ParserError>,
+                ctx: &mut (),
+            ) -> ParserResult<$ret> {
+                let (__len, names_pattern!($( $($match_name,)? )*)) = parsers!($(not_drop!($parser $(, $match_name)?)),*).parse(input, errs, ctx)?;
+                Some((__len, $block))
+            }
+        }
+    };
+}
+
+macro_rules! parser_fns {
+    ($($name:ident ($($tt:tt)*) -> $ret:ty $block:block $(;)?)* ) => { $( parser_fn!( $name ( $($tt)* ) -> $ret $block ); )+ };
+}
+
+macro_rules! parser_match {
+    ( $( $($(@ $match_name:ident =)? $parser:expr),* => $val:expr ),+ $(,)?) => {
+        parsers_choice!( $( parsers!( $(not_drop!($parser $(, $match_name)?)),* ).map(|names_pattern!( $($($match_name,)?)? )| { $val } ) ),* )
+    };
+}
+
+enum Op {
+    Add,
+    Sub,
+    Div,
+    Mul,
+}
+
+parser_fns! {
+    sep(char_filter(|c| c.is_ascii_whitespace(), "whitespace")) -> () {}
+
+    op(@o=parser_match! {
+        "+" => Op::Add,
+        "-" => Op::Sub,
+        "/" => Op::Div,
+        "*" => Op::Mul,
+    }) -> Op {o}
+
+    term(@t=int.or("(".then(expr).then(")"))) -> i32 {t}
+
+    expr(@left=term, sep.opt(), @o=op, sep.opt(), @right=term) -> i32 {
+        match o {
+            Op::Add => left + right,
+            Op::Sub => left - right,
+            Op::Div => left / right,
+            Op::Mul => left * right,
+        }
+    }
 }
 
 #[test]
 fn thing() {
-    let input = "a1a1a";
-    let mut parser = parsers!(int, int, "a", int, "a");
-    let output = parser.try_match(input);
-    println!("{output:?}");
+    let val = expr.try_match("1+(2*3)");
+    println!("{val:?}");
     panic!();
 }
