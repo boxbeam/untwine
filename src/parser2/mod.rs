@@ -107,6 +107,103 @@ impl<E> ErrorCell<E> {
 type ParserResult<T> = Option<(usize, T)>;
 type Context<'a, T> = &'a mut T;
 
+struct ToVec;
+
+pub trait Collector<T> {
+    type Container: Default;
+
+    fn consume(container: &mut Self::Container, elem: T);
+}
+
+impl<T> Collector<T> for ToVec {
+    type Container = Vec<T>;
+
+    fn consume(container: &mut Self::Container, elem: T) {
+        container.push(elem);
+    }
+}
+
+impl<T> Collector<T> for Ignore {
+    type Container = ();
+
+    fn consume(_container: &mut Self::Container, _elem: T) {}
+}
+
+pub trait DelimitedCollector<T, D> {
+    type Container;
+    fn from(&self, elem: T) -> Self::Container;
+    fn consume(&mut self, container: Self::Container, delim: D, elem: T) -> Self::Container;
+}
+
+impl<'a, T, D> DelimitedCollector<T, D> for ToVec {
+    type Container = Vec<T>;
+    fn consume(&mut self, mut container: Self::Container, _delim: D, elem: T) -> Self::Container {
+        container.push(elem);
+        container
+    }
+
+    fn from(&self, elem: T) -> Self::Container {
+        vec![elem]
+    }
+}
+
+fn lfold<'a, Elem, Delim, F>(f: F) -> impl DelimitedCollector<Elem, Delim, Container = Elem>
+where
+    F: FnMut(Elem, Delim, Elem) -> Elem,
+{
+    struct LFold<F, Elem, Delim> {
+        f: F,
+        phantom: PhantomData<(Elem, Delim)>,
+    }
+
+    impl<'a, F, Elem, Delim> DelimitedCollector<Elem, Delim> for LFold<F, Elem, Delim>
+    where
+        F: FnMut(Elem, Delim, Elem) -> Elem,
+    {
+        type Container = Elem;
+
+        fn from(&self, elem: Elem) -> Self::Container {
+            elem
+        }
+
+        fn consume(
+            &mut self,
+            container: Self::Container,
+            delim: Delim,
+            elem: Elem,
+        ) -> Self::Container {
+            (self.f)(container, delim, elem)
+        }
+    }
+
+    LFold {
+        f,
+        phantom: PhantomData,
+    }
+}
+
+pub trait OptionalOutput {
+    type Output<T>;
+
+    fn convert<V>(val: V) -> Self::Output<V>;
+}
+
+impl OptionalOutput for Keep {
+    type Output<T> = T;
+
+    fn convert<V>(val: V) -> Self::Output<V> {
+        val
+    }
+}
+
+impl OptionalOutput for Ignore {
+    type Output<T> = ();
+
+    fn convert<V>(_val: V) -> Self::Output<V> {
+        ()
+    }
+}
+
 pub trait Chain {
     type Output<A, B>;
     type NextKind;
@@ -184,22 +281,31 @@ pub trait Parser<Err, Ctx = ()> {
         }
     }
 
-    fn rep(
+    fn rep<Coll>(
         self,
-    ) -> impl for<'a> Parser<Err, Ctx, Output<'a> = Vec<Self::Output<'a>>, Kind = Self::Kind>
+        coll: Coll,
+    ) -> impl for<'a> Parser<
+        Err,
+        Ctx,
+        Output<'a> = <Coll as Collector<Self::Output<'a>>>::Container,
+        Kind = Self::Kind,
+    >
     where
         Self: Sized,
+        Coll: for<'a> Collector<Self::Output<'a>>,
     {
-        struct Repeat<P> {
+        struct Repeat<P, Coll> {
             p: P,
+            phantom: PhantomData<Coll>,
         }
 
-        impl<P, E, C> Parser<E, C> for Repeat<P>
+        impl<P, E, C, Coll> Parser<E, C> for Repeat<P, Coll>
         where
             P: Parser<E, C>,
+            Coll: for<'a> Collector<P::Output<'a>>,
         {
             type Kind = P::Kind;
-            type Output<'a> = Vec<P::Output<'a>>;
+            type Output<'a> = <Coll as Collector<P::Output<'a>>>::Container;
             fn parse<'a>(
                 &mut self,
                 input: Input<'a>,
@@ -207,16 +313,19 @@ pub trait Parser<Err, Ctx = ()> {
                 ctx: Context<C>,
             ) -> ParserResult<Self::Output<'a>> {
                 let (mut offset, first) = self.p.parse(input, errs.clone(), ctx)?;
-                let mut elems = vec![first];
+                let mut elems = Coll::Container::default();
                 while let Some((len, elem)) = self.p.parse(input.skip(offset), errs.clone(), ctx) {
                     offset += len;
-                    elems.push(elem);
+                    Coll::consume(&mut elems, elem);
                 }
                 Some((offset, elems))
             }
         }
 
-        Repeat { p: self }
+        Repeat {
+            p: self,
+            phantom: PhantomData::<Coll>,
+        }
     }
 
     fn or<P>(
@@ -342,9 +451,15 @@ pub trait Parser<Err, Ctx = ()> {
 
     fn opt(
         self,
-    ) -> impl for<'a> Parser<Err, Ctx, Output<'a> = Option<Self::Output<'a>>, Kind = Self::Kind>
+    ) -> impl for<'a> Parser<
+        Err,
+        Ctx,
+        Output<'a> = <Self::Kind as OptionalOutput>::Output<Option<Self::Output<'a>>>,
+        Kind = Self::Kind,
+    >
     where
         Self: Sized,
+        Self::Kind: OptionalOutput,
     {
         struct Optional<P> {
             p: P,
@@ -352,8 +467,9 @@ pub trait Parser<Err, Ctx = ()> {
         impl<P, Err, Ctx> Parser<Err, Ctx> for Optional<P>
         where
             P: Parser<Err, Ctx>,
+            P::Kind: OptionalOutput,
         {
-            type Output<'a> = Option<P::Output<'a>>;
+            type Output<'a> = <P::Kind as OptionalOutput>::Output<Option<P::Output<'a>>>;
             type Kind = P::Kind;
 
             fn parse<'a>(
@@ -363,8 +479,8 @@ pub trait Parser<Err, Ctx = ()> {
                 ctx: Context<Ctx>,
             ) -> ParserResult<Self::Output<'a>> {
                 match self.p.parse(input, errs, ctx) {
-                    Some((len, elem)) => Some((len, Some(elem))),
-                    None => Some((0, None)),
+                    Some((len, elem)) => Some((len, P::Kind::convert(Some(elem)))),
+                    None => Some((0, P::Kind::convert(None))),
                 }
             }
         }
@@ -425,6 +541,69 @@ pub trait Parser<Err, Ctx = ()> {
             }
         }
         Slice { p: self }
+    }
+
+    fn delim_by<P, Coll>(
+        self,
+        delim: P,
+        collect: Coll,
+    ) -> impl for<'a> Parser<
+        Err,
+        Ctx,
+        Output<'a> = <Coll as DelimitedCollector<Self::Output<'a>, P::Output<'a>>>::Container,
+    >
+    where
+        P: Parser<Err, Ctx>,
+        Self: Sized,
+        Coll: for<'a> DelimitedCollector<Self::Output<'a>, P::Output<'a>>,
+    {
+        struct DelimBy<P1, P2, Coll> {
+            elem: P1,
+            delim: P2,
+            coll: Coll,
+        }
+
+        impl<P1, P2, Coll, E, C> Parser<E, C> for DelimBy<P1, P2, Coll>
+        where
+            P1: Parser<E, C>,
+            P2: Parser<E, C>,
+            Coll: for<'a> DelimitedCollector<P1::Output<'a>, P2::Output<'a>>,
+        {
+            type Output<'a> =
+                <Coll as DelimitedCollector<P1::Output<'a>, P2::Output<'a>>>::Container;
+            type Kind = Keep;
+
+            fn parse<'a>(
+                &mut self,
+                input: Input<'a>,
+                errs: impl ErrorHandler<E>,
+                ctx: Context<C>,
+            ) -> ParserResult<Self::Output<'a>> {
+                let (mut offset, first) = self.elem.parse(input, errs.clone(), ctx)?;
+                let mut container = self.coll.from(first);
+                while let Some((delim_len, delim)) =
+                    self.delim.parse(input.skip(offset), errs.clone(), ctx)
+                {
+                    match self
+                        .elem
+                        .parse(input.skip(offset + delim_len), errs.clone(), ctx)
+                    {
+                        Some((elem_len, next)) => {
+                            offset += delim_len + elem_len;
+                            container = self.coll.consume(container, delim, next);
+                        }
+                        None => break,
+                    }
+                }
+                Some((offset, container))
+            }
+        }
+
+        DelimBy {
+            elem: self,
+            delim,
+            coll: collect,
+        }
     }
 
     fn then<P>(
@@ -587,7 +766,7 @@ pub trait Parser<Err, Ctx = ()> {
                 let errs_clone = errs.clone();
                 let handler = |e: ParserError, loc| errs_clone.error(E::from(e), loc);
                 Parser::parse(&mut self.before, input, &handler, &mut ())?;
-                let (len, val) = self.parse(input.skip(self.before.len()), errs, ctx)?;
+                let (len, val) = self.p.parse(input.skip(self.before.len()), errs, ctx)?;
                 Parser::parse(
                     &mut self.after,
                     input.skip(self.before.len() + len),
@@ -602,6 +781,46 @@ pub trait Parser<Err, Ctx = ()> {
             before,
             after,
         }
+    }
+
+    fn pad<P>(
+        self,
+        pad: P,
+    ) -> impl for<'a> Parser<Err, Ctx, Output<'a> = Self::Output<'a>, Kind = Self::Kind>
+    where
+        P: Parser<Err, Ctx>,
+        Self: Sized,
+    {
+        struct Pad<P1, P2> {
+            elem: P1,
+            pad: P2,
+        }
+        impl<P1, P2, E, C> Parser<E, C> for Pad<P1, P2>
+        where
+            P1: Parser<E, C>,
+            P2: Parser<E, C>,
+        {
+            type Output<'a> = P1::Output<'a>;
+
+            type Kind = P1::Kind;
+
+            fn parse<'a>(
+                &mut self,
+                input: Input<'a>,
+                errs: impl ErrorHandler<E>,
+                ctx: Context<C>,
+            ) -> ParserResult<Self::Output<'a>> {
+                let (len, _) = self.pad.parse(input, errs.clone(), ctx)?;
+                let mut offset = len;
+                let (len, val) = self.elem.parse(input.skip(offset), errs.clone(), ctx)?;
+                offset += len;
+                let (len, _) = self.pad.parse(input.skip(offset), errs, ctx)?;
+                offset += len;
+                Some((offset, val))
+            }
+        }
+
+        Pad { elem: self, pad }
     }
 }
 
@@ -833,8 +1052,17 @@ macro_rules! ret_type {
     };
 }
 
+macro_rules! keep_type {
+    ($ty:ty) => {
+        Keep
+    };
+    () => {
+        Ignore
+    };
+}
+
 macro_rules! parser_fn {
-    ($name:ident ($( $(@ $match_name:ident =)? $parser:expr),*) -> $ret:ty $block:block) => {
+    ($vis:vis $name:ident ($( $(@ $match_name:ident =)? $parser:expr),*) -> $ret:ty $block:block) => {
         #[allow(non_camel_case_types)]
         struct $name;
 
@@ -853,13 +1081,13 @@ macro_rules! parser_fn {
             }
         }
     };
-    ($name:ident ($( $(@ $match_name:ident =)? $parser:expr),*) $(-> $ret:ty)?) => {
+    ($vis:vis $name:ident ($( $(@ $match_name:ident =)? $parser:expr),*) $(-> $ret:ty)?) => {
         #[allow(non_camel_case_types)]
-        struct $name;
+        $vis struct $name;
 
         impl Parser<ParserError, ()> for $name {
             type Output<'a> = ret_type!($($ret)?);
-            type Kind = Keep;
+            type Kind = keep_type!($($ret)?);
 
             fn parse<'a>(
                 &mut self,
@@ -875,7 +1103,7 @@ macro_rules! parser_fn {
 }
 
 macro_rules! parser_fns {
-    ($($name:ident ($($tt:tt)*) $(-> $ret:ty)? $($block:block)? $(;)?)* ) => { $( parser_fn!( $name ( $($tt)* ) $(-> $ret)? $($block)? ); )+ };
+    ($($vis:vis $name:ident ($($tt:tt)*) $(-> $ret:ty)? $($block:block)? $(;)?)* ) => { $( parser_fn!( $vis $name ( $($tt)* ) $(-> $ret)? $($block)? ); )+ };
 }
 
 macro_rules! parser_match {
@@ -884,39 +1112,29 @@ macro_rules! parser_match {
     };
 }
 
-enum Op {
-    Add,
-    Sub,
-    Div,
-    Mul,
+fn operate(l: i32, o: char, r: i32) -> i32 {
+    match o {
+        '+' => l + r,
+        '-' => l - r,
+        '/' => l / r,
+        '*' => l * r,
+        _ => unreachable!(),
+    }
 }
 
-parser_fn!(sep(char::is_whitespace.rep().drop()));
-
 parser_fns! {
+    sep(char::is_whitespace.drop().rep(Ignore).opt());
 
-    op(parser_match! {
-        '+' => Op::Add,
-        '-' => Op::Sub,
-        '/' => Op::Div,
-        '*' => Op::Mul,
-    }) -> Op
+    add(mul.delim_by(['+', '-'].pad(sep), lfold(operate))) -> i32
+    mul(term.delim_by(['*', '/'].pad(sep), lfold(operate))) -> i32
+    neg('-', sep, int.map(|i| -i)) -> i32
+    term(neg.or(int).or(expr.pad(sep).wrapped("(", ")"))) -> i32
 
-    term(int.or(expr.wrapped("(", ")"))) -> i32
-
-    expr(@left=term, sep, @o=op, sep, @right=term) -> i32 {
-        match o {
-            Op::Add => left + right,
-            Op::Sub => left - right,
-            Op::Div => left / right,
-            Op::Mul => left * right,
-        }
-    }
+    pub expr(add) -> i32
 }
 
 #[test]
 fn thing() {
-    let val = expr.try_match("1+(2*3)");
-    println!("{val:?}");
-    panic!();
+    let val = expr.try_match("- 1 + 2 * 3");
+    assert_eq!(5, val.unwrap());
 }
