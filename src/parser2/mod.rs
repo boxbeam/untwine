@@ -800,6 +800,69 @@ pub trait Parser<Err, Ctx = ()> {
         }
     }
 
+    fn lookahead(self) -> impl for<'a> Parser<Err, Ctx, Output<'a> = (), Kind = Ignore>
+    where
+        Self: Sized,
+    {
+        struct Lookahead<P> {
+            p: P,
+        }
+        impl<P, C, E> Parser<C, E> for Lookahead<P>
+        where
+            P: Parser<C, E>,
+        {
+            type Output<'a> = ();
+            type Kind = Ignore;
+
+            fn parse<'a>(
+                &mut self,
+                input: Input<'a>,
+                errs: impl ErrorHandler<C>,
+                ctx: Context<E>,
+            ) -> ParserResult<Self::Output<'a>> {
+                let _ = self.p.parse(input, errs, ctx)?;
+                Some((0, ()))
+            }
+        }
+
+        Lookahead { p: self }
+    }
+
+    fn not(self) -> impl for<'a> Parser<Err, Ctx, Output<'a> = (), Kind = Ignore>
+    where
+        Self: Sized,
+        Err: From<ParserError>,
+    {
+        struct Not<P> {
+            p: P,
+        }
+        impl<P, E, C> Parser<E, C> for Not<P>
+        where
+            P: Parser<E, C>,
+            E: From<ParserError>,
+        {
+            type Output<'a> = ();
+            type Kind = Ignore;
+
+            fn parse<'a>(
+                &mut self,
+                input: Input<'a>,
+                errs: impl ErrorHandler<E>,
+                ctx: Context<C>,
+            ) -> ParserResult<Self::Output<'a>> {
+                let result = self.p.parse(input, errs.clone(), ctx);
+                if result.is_some() {
+                    errs.error(ParserError::UnexpectedToken, input.cur..input.cur);
+                    None
+                } else {
+                    Some((0, ()))
+                }
+            }
+        }
+
+        Not { p: self }
+    }
+
     fn pad<P>(
         self,
         pad: P,
@@ -841,10 +904,85 @@ pub trait Parser<Err, Ctx = ()> {
     }
 }
 
+pub trait FixedLengthParser<E, C>: Parser<E, C> {
+    fn parsed_len(&self) -> usize;
+
+    fn lookbehind(self) -> impl for<'a> Parser<E, C, Output<'a> = (), Kind = Ignore>
+    where
+        Self: Sized,
+    {
+        struct Lookbehind<P> {
+            p: P,
+        }
+        impl<P, C, E> Parser<C, E> for Lookbehind<P>
+        where
+            P: FixedLengthParser<C, E>,
+        {
+            type Output<'a> = ();
+            type Kind = Ignore;
+
+            fn parse<'a>(
+                &mut self,
+                input: Input<'a>,
+                errs: impl ErrorHandler<C>,
+                ctx: Context<E>,
+            ) -> ParserResult<Self::Output<'a>> {
+                let new_input = Input {
+                    src: input.src,
+                    cur: input.cur - self.p.parsed_len(),
+                };
+                let _ = self.p.parse(new_input, errs, ctx)?;
+                Some((0, ()))
+            }
+        }
+
+        Lookbehind { p: self }
+    }
+
+    fn negative_lookbehind(self) -> impl for<'a> Parser<E, C, Output<'a> = (), Kind = Ignore>
+    where
+        Self: Sized,
+        E: From<ParserError>,
+    {
+        struct NegativeLookbehind<P> {
+            p: P,
+        }
+        impl<P, E, C> Parser<E, C> for NegativeLookbehind<P>
+        where
+            P: FixedLengthParser<E, C>,
+            E: From<ParserError>,
+        {
+            type Output<'a> = ();
+            type Kind = Ignore;
+
+            fn parse<'a>(
+                &mut self,
+                input: Input<'a>,
+                errs: impl ErrorHandler<E>,
+                ctx: Context<C>,
+            ) -> ParserResult<Self::Output<'a>> {
+                let new_input = Input {
+                    src: input.src,
+                    cur: input.cur - self.p.parsed_len(),
+                };
+                let result = self.p.parse(new_input, errs.clone(), ctx);
+                if result.is_some() {
+                    errs.error(ParserError::UnexpectedToken, input.cur..input.cur);
+                    None
+                } else {
+                    Some((0, ()))
+                }
+            }
+        }
+
+        NegativeLookbehind { p: self }
+    }
+}
+
 fn lit<E, C>(
     lit: &'static str,
     parser_name: &'static str,
-) -> impl for<'a> Parser<E, C, Output<'a> = (), Kind = Ignore>
+) -> impl for<'a> FixedLengthParser<E, C, Output<'a> = (), Kind = Ignore>
 where
     E: From<ParserError>,
 {
@@ -852,6 +990,7 @@ where
         lit: &'static str,
         parser_name: &'static str,
     }
+
     impl<E, C> Parser<E, C> for LitParser
     where
         E: From<ParserError>,
@@ -881,6 +1020,16 @@ where
             }
         }
     }
+
+    impl<E, C> FixedLengthParser<E, C> for LitParser
+    where
+        E: From<ParserError>,
+    {
+        fn parsed_len(&self) -> usize {
+            self.lit.len()
+        }
+    }
+
     LitParser { lit, parser_name }
 }
 
@@ -929,17 +1078,29 @@ where
     }
 }
 
-impl<C> Parser<ParserError, C> for &'static str {
+impl<E, C> Parser<E, C> for &'static str
+where
+    E: From<ParserError>,
+{
     type Output<'b> = ();
     type Kind = Ignore;
 
     fn parse<'a>(
         &mut self,
         input: Input<'a>,
-        errs: impl ErrorHandler<ParserError>,
+        errs: impl ErrorHandler<E>,
         ctx: Context<C>,
     ) -> ParserResult<Self::Output<'a>> {
         lit(self, self).parse(input, errs, ctx)
+    }
+}
+
+impl<E, C> FixedLengthParser<E, C> for &'static str
+where
+    E: From<ParserError>,
+{
+    fn parsed_len(&self) -> usize {
+        str::len(self)
     }
 }
 
@@ -1202,7 +1363,11 @@ parser_fns! {
 
     List(Value.delim_by(",".pad(sep), ToVec).wrapped("[", "]").map(JSONValue::List)) -> JSONValue
 
-    pub Value(List.or(Bool).or(Float).or(Int.map(JSONValue::Int)).or(Null).or(Str.map(JSONValue::String))) -> JSONValue
+    Map(@v=Str.then(":".pad(sep).then(Value)).delim_by(",".pad(sep), ToVec).wrapped("{", "}")) -> JSONValue {
+        JSONValue::Map(v.into_iter().collect())
+    }
+
+    pub Value(List.or(Map).or(Bool).or(Float).or(Int.map(JSONValue::Int)).or(Null).or(Str.map(JSONValue::String))) -> JSONValue
 }
 
 #[test]
