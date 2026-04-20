@@ -1,4 +1,10 @@
-use std::{cell::UnsafeCell, fmt::Debug, marker::PhantomData, ops::Range};
+use std::{
+    cell::UnsafeCell,
+    collections::HashMap,
+    fmt::Debug,
+    marker::PhantomData,
+    ops::{Range, RangeInclusive},
+};
 
 use crate::ParserError;
 
@@ -144,6 +150,17 @@ impl<'a, T, D> DelimitedCollector<T, D> for ToVec {
 
     fn from(&self, elem: T) -> Self::Container {
         vec![elem]
+    }
+}
+
+impl<'a, T, D> DelimitedCollector<T, D> for Ignore {
+    type Container = ();
+    fn consume(&mut self, container: Self::Container, _delim: D, elem: T) -> Self::Container {
+        ()
+    }
+
+    fn from(&self, elem: T) -> Self::Container {
+        ()
     }
 }
 
@@ -962,6 +979,27 @@ impl Parser<ParserError, ()> for char {
     }
 }
 
+impl Parser<ParserError, ()> for RangeInclusive<char> {
+    type Output<'a> = char;
+    type Kind = Keep;
+
+    fn parse<'a>(
+        &mut self,
+        input: Input<'a>,
+        errs: impl ErrorHandler<ParserError>,
+        ctx: Context<()>,
+    ) -> ParserResult<Self::Output<'a>> {
+        let c = input.slice().chars().next();
+        if let Some(c) = c
+            && self.contains(&c)
+        {
+            Some((c.len_utf8(), c))
+        } else {
+            None
+        }
+    }
+}
+
 struct int;
 impl Parser<ParserError, ()> for int {
     type Output<'a> = i32;
@@ -1095,7 +1133,7 @@ macro_rules! parser_fn {
                 errs: impl ErrorHandler<ParserError>,
                 ctx: &mut (),
             ) -> ParserResult<ret_type!($($ret)?)> {
-                let (__len, val) = p!($($parser),*).parse(input, errs, ctx)?;
+                let (__len, val) = Parser::parse(&mut p!($($parser),*), input, errs, ctx)?;
                 Some((__len, val))
             }
         }
@@ -1106,7 +1144,7 @@ macro_rules! parser_fns {
     ($($vis:vis $name:ident ($($tt:tt)*) $(-> $ret:ty)? $($block:block)? $(;)?)* ) => { $( parser_fn!( $vis $name ( $($tt)* ) $(-> $ret)? $($block)? ); )+ };
 }
 
-macro_rules! parser_match {
+macro_rules! pmatch {
     ( $( $($(@ $match_name:ident =)? $parser:expr),* => $val:expr ),+ $(,)?) => {
         parsers_choice!( $( p!( $(not_drop!($parser $(, $match_name)?)),* ).map(|names_pattern!( $($($match_name,)?)? )| { $val } ) ),* )
     };
@@ -1133,8 +1171,44 @@ parser_fns! {
     pub expr(add) -> i32
 }
 
+#[derive(Debug, PartialEq)]
+pub enum JSONValue {
+    String(String),
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Null,
+    List(Vec<JSONValue>),
+    Map(HashMap<String, JSONValue>),
+}
+
+parser_fns! {
+    StrChar((|c: char| c != '"' && c != '\\')) -> char
+
+    EscapeSeq('\\', |_| true) -> char
+
+    Str('"', @s=EscapeSeq.or(StrChar).rep(Ignore).slice(), '"') -> String { s.to_string() }
+
+    Null("null") -> JSONValue { JSONValue::Null }
+
+    Int(@i=int) -> JSONValue { JSONValue::Int(i as i64) }
+
+    Digits(('0'..='9').rep(Ignore))
+
+    Float(@i=p!("-".opt(), Digits, ".".then(Digits)).slice()) -> JSONValue { JSONValue::Float(i.parse().unwrap()) }
+
+    Bool(pmatch!{
+        "true" => JSONValue::Bool(true),
+        "false" => JSONValue::Bool(false),
+    }) -> JSONValue
+
+    List(Value.delim_by(",".pad(sep), ToVec).wrapped("[", "]").map(JSONValue::List)) -> JSONValue
+
+    pub Value(List.or(Bool).or(Float).or(Int).or(Null).or(Str.map(JSONValue::String))) -> JSONValue
+}
+
 #[test]
 fn thing() {
-    let val = expr.try_match("- 1 + 2 * 3");
-    assert_eq!(5, val.unwrap());
+    let val = Value.try_match("[1, 2, 3]");
+    assert_eq!(JSONValue::Null, val.unwrap());
 }
