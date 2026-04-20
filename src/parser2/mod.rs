@@ -27,9 +27,9 @@ impl<E, C> Parser<E, C> for Nop {
 
     fn parse<'a>(
         &mut self,
-        input: Input<'a>,
-        errs: impl ErrorHandler<E>,
-        ctx: Context<C>,
+        _input: Input<'a>,
+        _errs: impl ErrorHandler<E>,
+        _ctx: Context<C>,
     ) -> ParserResult<Self::Output<'a>> {
         Some((0, ()))
     }
@@ -70,7 +70,7 @@ where
 }
 
 #[derive(Clone)]
-struct DebugErrorHandler;
+pub struct DebugErrorHandler;
 
 impl<E> ErrorHandler<E> for DebugErrorHandler
 where
@@ -83,7 +83,7 @@ where
 }
 
 #[derive(Debug)]
-struct ErrorLocation<E>(E, Range<usize>);
+pub struct ErrorLocation<E>(E, Range<usize>);
 
 struct ErrorCell<E> {
     inner: UnsafeCell<Option<ErrorLocation<E>>>,
@@ -155,11 +155,11 @@ impl<'a, T, D> DelimitedCollector<T, D> for ToVec {
 
 impl<'a, T, D> DelimitedCollector<T, D> for Ignore {
     type Container = ();
-    fn consume(&mut self, container: Self::Container, _delim: D, elem: T) -> Self::Container {
+    fn consume(&mut self, _container: Self::Container, _delim: D, _elem: T) -> Self::Container {
         ()
     }
 
-    fn from(&self, elem: T) -> Self::Container {
+    fn from(&self, _elem: T) -> Self::Container {
         ()
     }
 }
@@ -248,7 +248,7 @@ impl Chain for ChainImpl<Keep, Ignore> {
     type Output<A, B> = A;
     type NextKind = Keep;
 
-    fn chain<A, B>(a: A, b: B) -> Self::Output<A, B> {
+    fn chain<A, B>(a: A, _b: B) -> Self::Output<A, B> {
         a
     }
 }
@@ -257,7 +257,7 @@ impl Chain for ChainImpl<Ignore, Keep> {
     type Output<A, B> = B;
     type NextKind = Keep;
 
-    fn chain<A, B>(a: A, b: B) -> Self::Output<A, B> {
+    fn chain<A, B>(_a: A, b: B) -> Self::Output<A, B> {
         b
     }
 }
@@ -266,7 +266,7 @@ impl Chain for ChainImpl<Ignore, Ignore> {
     type Output<A, B> = ();
     type NextKind = Ignore;
 
-    fn chain<A, B>(a: A, b: B) -> Self::Output<A, B> {
+    fn chain<A, B>(_a: A, _b: B) -> Self::Output<A, B> {
         ()
     }
 }
@@ -300,7 +300,7 @@ pub trait Parser<Err, Ctx = ()> {
 
     fn rep<Coll>(
         self,
-        coll: Coll,
+        _coll: Coll,
     ) -> impl for<'a> Parser<
         Err,
         Ctx,
@@ -329,7 +329,7 @@ pub trait Parser<Err, Ctx = ()> {
                 errs: impl ErrorHandler<E>,
                 ctx: Context<C>,
             ) -> ParserResult<Self::Output<'a>> {
-                let (mut offset, first) = self.p.parse(input, errs.clone(), ctx)?;
+                let (mut offset, _first) = self.p.parse(input, errs.clone(), ctx)?;
                 let mut elems = Coll::Container::default();
                 while let Some((len, elem)) = self.p.parse(input.skip(offset), errs.clone(), ctx) {
                     offset += len;
@@ -884,7 +884,7 @@ where
     LitParser { lit, parser_name }
 }
 
-fn char_filter<E>(
+pub fn char_filter<E>(
     filter: impl Fn(char) -> bool,
     parser_name: &'static str,
 ) -> impl for<'a> Parser<E, Output<'a> = char, Kind = Keep>
@@ -907,7 +907,7 @@ where
             &mut self,
             input: Input,
             errs: impl ErrorHandler<E>,
-            ctx: Context<C>,
+            _ctx: Context<C>,
         ) -> ParserResult<Self::Output<'_>> {
             let next_char = input.slice().chars().next();
             if let Some(c) = next_char
@@ -953,8 +953,8 @@ where
     fn parse<'a>(
         &mut self,
         input: Input<'a>,
-        errs: impl ErrorHandler<ParserError>,
-        ctx: Context<()>,
+        _errs: impl ErrorHandler<ParserError>,
+        _ctx: Context<()>,
     ) -> ParserResult<Self::Output<'a>> {
         let c = input.slice().chars().next().filter(|c| self(*c))?;
         Some((c.len_utf8(), c))
@@ -968,8 +968,8 @@ impl Parser<ParserError, ()> for char {
     fn parse<'a>(
         &mut self,
         input: Input<'a>,
-        errs: impl ErrorHandler<ParserError>,
-        ctx: Context<()>,
+        _errs: impl ErrorHandler<ParserError>,
+        _ctx: Context<()>,
     ) -> ParserResult<Self::Output<'a>> {
         if input.slice().starts_with(*self) {
             Some((self.len_utf8(), ()))
@@ -986,8 +986,8 @@ impl Parser<ParserError, ()> for RangeInclusive<char> {
     fn parse<'a>(
         &mut self,
         input: Input<'a>,
-        errs: impl ErrorHandler<ParserError>,
-        ctx: Context<()>,
+        _errs: impl ErrorHandler<ParserError>,
+        _ctx: Context<()>,
     ) -> ParserResult<Self::Output<'a>> {
         let c = input.slice().chars().next();
         if let Some(c) = c
@@ -1000,15 +1000,15 @@ impl Parser<ParserError, ()> for RangeInclusive<char> {
     }
 }
 
-struct int;
-impl Parser<ParserError, ()> for int {
-    type Output<'a> = i32;
+struct Int;
+impl Parser<ParserError, ()> for Int {
+    type Output<'a> = i64;
     type Kind = Keep;
     fn parse(
         &mut self,
         input: Input,
-        errs: impl ErrorHandler<ParserError>,
-        ctx: Context<()>,
+        _errs: impl ErrorHandler<ParserError>,
+        _ctx: Context<()>,
     ) -> ParserResult<Self::Output<'_>> {
         let bytes = input
             .slice()
@@ -1150,7 +1150,7 @@ macro_rules! pmatch {
     };
 }
 
-fn operate(l: i32, o: char, r: i32) -> i32 {
+fn operate(l: i64, o: char, r: i64) -> i64 {
     match o {
         '+' => l + r,
         '-' => l - r,
@@ -1163,12 +1163,12 @@ fn operate(l: i32, o: char, r: i32) -> i32 {
 parser_fns! {
     sep(char::is_whitespace.drop().rep(Ignore).opt());
 
-    add(mul.delim_by(['+', '-'].pad(sep), lfold(operate))) -> i32
-    mul(term.delim_by(['*', '/'].pad(sep), lfold(operate))) -> i32
-    neg('-', sep, int.map(|i| -i)) -> i32
-    term(neg.or(int).or(expr.pad(sep).wrapped("(", ")"))) -> i32
+    add(mul.delim_by(['+', '-'].pad(sep), lfold(operate))) -> i64
+    mul(term.delim_by(['*', '/'].pad(sep), lfold(operate))) -> i64
+    neg('-', sep, Int.map(|i| -i)) -> i64
+    term(neg.or(Int).or(expr.pad(sep).wrapped("(", ")"))) -> i64
 
-    pub expr(add) -> i32
+    pub expr(add) -> i64
 }
 
 #[derive(Debug, PartialEq)]
@@ -1191,8 +1191,6 @@ parser_fns! {
 
     Null("null") -> JSONValue { JSONValue::Null }
 
-    Int(@i=int) -> JSONValue { JSONValue::Int(i as i64) }
-
     Digits(('0'..='9').rep(Ignore))
 
     Float(@i=p!("-".opt(), Digits, ".".then(Digits)).slice()) -> JSONValue { JSONValue::Float(i.parse().unwrap()) }
@@ -1204,7 +1202,7 @@ parser_fns! {
 
     List(Value.delim_by(",".pad(sep), ToVec).wrapped("[", "]").map(JSONValue::List)) -> JSONValue
 
-    pub Value(List.or(Bool).or(Float).or(Int).or(Null).or(Str.map(JSONValue::String))) -> JSONValue
+    pub Value(List.or(Bool).or(Float).or(Int.map(JSONValue::Int)).or(Null).or(Str.map(JSONValue::String))) -> JSONValue
 }
 
 #[test]

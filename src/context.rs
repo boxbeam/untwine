@@ -73,7 +73,7 @@ impl<'p, C, E> ParserContext<'p, C, E> {
         col(&self.input[..self.cursor()])
     }
 
-    pub(crate) fn lock_errors(&self) -> ErrsLock<C, E> {
+    pub(crate) fn lock_errors(&self) -> ErrsLock<'_, C, E> {
         let previous_value = self.errs_locked.get();
         self.errs_locked.set(true);
         ErrsLock {
