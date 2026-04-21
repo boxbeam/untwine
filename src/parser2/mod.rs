@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     marker::PhantomData,
+    num::ParseIntError,
     ops::{Range, RangeInclusive},
 };
 
@@ -1251,6 +1252,15 @@ macro_rules! ret_type {
     };
 }
 
+macro_rules! err_type {
+    ($ty:ty) => {
+        $ty
+    };
+    () => {
+        ParserError
+    };
+}
+
 macro_rules! keep_type {
     ($ty:ty) => {
         Keep
@@ -1260,38 +1270,51 @@ macro_rules! keep_type {
     };
 }
 
+macro_rules! map_or_try_map {
+    ($err_typ:ty | $parser:expr ; $names_pat:pat => $block:block) => {
+        $parser.try_map(|$names_pat| $block)
+    };
+    (| $parser:expr ; $names_pat:pat => $block:block) => {
+        $parser.map(|$names_pat| $block)
+    };
+}
+
 macro_rules! parser_fn {
-    ($vis:vis $name:ident ($( $(@ $match_name:ident =)? $parser:expr),*) -> $ret:ty $block:block) => {
+    ($vis:vis $name:ident ($( $(@ $match_name:ident =)? $parser:expr),*) -> $ret:ty $(, $err_ret:ty)? $block:block) => {
         #[allow(non_camel_case_types)]
         struct $name;
 
-        impl Parser<ParserError, ()> for $name {
+        impl Parser<err_type!($($err_ret)?), ()> for $name {
             type Output<'a> = $ret;
             type Kind = Keep;
 
             fn parse<'a>(
                 &mut self,
                 input: Input<'a>,
-                errs: impl ErrorHandler<ParserError>,
+                errs: impl ErrorHandler<err_type!($($err_ret)?)>,
                 ctx: &mut (),
             ) -> ParserResult<$ret> {
-                let (__len, names_pattern!($( $($match_name,)? )*)) = p!($(not_drop!($parser $(, $match_name)?)),*).parse(input, errs, ctx)?;
-                Some((__len, $block))
+                let (__len, val) = map_or_try_map!(
+                    $($err_ret)? |
+                    p!($(not_drop!($parser $(, $match_name)?)),*) ;
+                    names_pattern!($($($match_name ,)?)*) => $block
+                ).parse(input, errs, ctx)?;
+                Some((__len, val))
             }
         }
     };
-    ($vis:vis $name:ident ($( $(@ $match_name:ident =)? $parser:expr),*) $(-> $ret:ty)?) => {
+    ($vis:vis $name:ident ($( $parser:expr),*) $(-> $ret:ty $(, $err_ret:ty)?)?) => {
         #[allow(non_camel_case_types)]
         $vis struct $name;
 
-        impl Parser<ParserError, ()> for $name {
+        impl Parser<err_type!($($($err_ret)?)?), ()> for $name {
             type Output<'a> = ret_type!($($ret)?);
             type Kind = keep_type!($($ret)?);
 
             fn parse<'a>(
                 &mut self,
                 input: Input<'a>,
-                errs: impl ErrorHandler<ParserError>,
+                errs: impl ErrorHandler<err_type!($($($err_ret)?)?)>,
                 ctx: &mut (),
             ) -> ParserResult<ret_type!($($ret)?)> {
                 let (__len, val) = Parser::parse(&mut p!($($parser),*), input, errs, ctx)?;
@@ -1302,7 +1325,7 @@ macro_rules! parser_fn {
 }
 
 macro_rules! parser_fns {
-    ($($vis:vis $name:ident ($($tt:tt)*) $(-> $ret:ty)? $($block:block)? $(;)?)* ) => { $( parser_fn!( $vis $name ( $($tt)* ) $(-> $ret)? $($block)? ); )+ };
+    ($($vis:vis $name:ident ($($tt:tt)*) $(-> $ret:ty $(, $err_ret:ty)?)? $($block:block)? ;)* ) => { $( parser_fn!( $vis $name ( $($tt)* ) $(-> $ret $(, $err_ret)?)? $($block)? ); )+ };
 }
 
 macro_rules! pmatch {
@@ -1311,25 +1334,38 @@ macro_rules! pmatch {
     };
 }
 
-fn operate(l: i64, o: char, r: i64) -> i64 {
+fn operate(l: i64, o: Operation, r: i64) -> i64 {
     match o {
-        '+' => l + r,
-        '-' => l - r,
-        '/' => l / r,
-        '*' => l * r,
-        _ => unreachable!(),
+        Operation::Add => l + r,
+        Operation::Mul => l - r,
+        Operation::Div => l / r,
+        Operation::Sub => l * r,
     }
+}
+
+enum Operation {
+    Add,
+    Mul,
+    Div,
+    Sub,
 }
 
 parser_fns! {
     sep(char::is_whitespace.drop().rep(Ignore).opt());
 
-    add(mul.delim_by(['+', '-'].pad(sep), lfold(operate))) -> i64
-    mul(term.delim_by(['*', '/'].pad(sep), lfold(operate))) -> i64
-    neg('-', sep, Int.map(|i| -i)) -> i64
-    term(neg.or(Int).or(expr.pad(sep).wrapped("(", ")"))) -> i64
+    op(pmatch! {
+        "+" => Operation::Add,
+        "-" => Operation::Mul,
+        "/" => Operation::Div,
+        "*" => Operation::Sub,
+    }) -> Operation;
 
-    pub expr(add) -> i64
+    add(mul.delim_by(['+', '-'].lookahead().then(op).pad(sep), lfold(operate))) -> i64;
+    mul(term.delim_by(['*', '/'].lookahead().then(op).pad(sep), lfold(operate))) -> i64;
+    neg('-', sep, term.map(|i| -i)) -> i64;
+    term(neg.or(Int).or(expr.pad(sep).wrapped("(", ")"))) -> i64;
+
+    pub expr(add) -> i64;
 }
 
 #[derive(Debug, PartialEq)]
@@ -1344,30 +1380,54 @@ pub enum JSONValue {
 }
 
 parser_fns! {
-    StrChar((|c: char| c != '"' && c != '\\')) -> char
+    StrChar((|c: char| c != '"' && c != '\\')) -> char;
 
-    EscapeSeq('\\', |_| true) -> char
+    EscapeSeq('\\', |_| true) -> char;
 
-    Str('"', @s=EscapeSeq.or(StrChar).rep(Ignore).slice(), '"') -> String { s.to_string() }
+    Str('"', @s=EscapeSeq.or(StrChar).rep(Ignore).slice(), '"') -> String { s.to_string() };
 
-    Null("null") -> JSONValue { JSONValue::Null }
+    Null("null") -> JSONValue { JSONValue::Null };
 
-    Digits(('0'..='9').rep(Ignore))
+    Digits(('0'..='9').rep(Ignore));
 
-    Float(@i=p!("-".opt(), Digits, ".".then(Digits)).slice()) -> JSONValue { JSONValue::Float(i.parse().unwrap()) }
+    Float(@i=p!("-".opt(), Digits, ".".then(Digits)).slice()) -> JSONValue { JSONValue::Float(i.parse().unwrap()) };
 
     Bool(pmatch!{
         "true" => JSONValue::Bool(true),
         "false" => JSONValue::Bool(false),
-    }) -> JSONValue
+    }) -> JSONValue;
 
-    List(Value.delim_by(",".pad(sep), ToVec).wrapped("[", "]").map(JSONValue::List)) -> JSONValue
+    List(Value.delim_by(",".pad(sep), ToVec).wrapped("[", "]").map(JSONValue::List)) -> JSONValue;
 
     Map(@v=Str.then(":".pad(sep).then(Value)).delim_by(",".pad(sep), ToVec).wrapped("{", "}")) -> JSONValue {
         JSONValue::Map(v.into_iter().collect())
-    }
+    };
 
-    pub Value(List.or(Map).or(Bool).or(Float).or(Int.map(JSONValue::Int)).or(Null).or(Str.map(JSONValue::String))) -> JSONValue
+    pub Value(List.or(Map).or(Bool).or(Float).or(Int.map(JSONValue::Int)).or(Null).or(Str.map(JSONValue::String))) -> JSONValue;
+}
+
+enum MyError {
+    Int(ParseIntError),
+    Parse(ParserError),
+}
+
+impl From<ParseIntError> for MyError {
+    fn from(value: ParseIntError) -> Self {
+        MyError::Int(value)
+    }
+}
+
+impl From<ParserError> for MyError {
+    fn from(value: ParserError) -> Self {
+        MyError::Parse(value)
+    }
+}
+
+parser_fns! {
+    Int2(@s="-".opt().then(Digits).slice()) -> i64, MyError {
+        s.parse()
+    };
+    Int3("-".opt().then(Digits).slice().try_map(str::parse)) -> i64, MyError;
 }
 
 #[test]
