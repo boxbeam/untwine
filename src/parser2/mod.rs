@@ -20,22 +20,6 @@ pub struct Input<'a> {
     cur: usize,
 }
 
-pub struct Nop;
-
-impl<E, C> Parser<E, C> for Nop {
-    type Output<'a> = ();
-    type Kind = Ignore;
-
-    fn parse<'a>(
-        &mut self,
-        _input: Input<'a>,
-        _errs: impl ErrorHandler<E>,
-        _ctx: Context<C>,
-    ) -> ParserResult<Self::Output<'a>> {
-        Some((0, ()))
-    }
-}
-
 impl<'a> Input<'a> {
     fn slice(&'a self) -> &'a str {
         &self.src[self.cur..]
@@ -119,13 +103,75 @@ struct ToVec;
 pub trait Collector<T> {
     type Container: Default;
 
-    fn consume(container: &mut Self::Container, elem: T);
+    fn consume(&self, container: &mut Self::Container, elem: T);
+}
+
+trait Insert {
+    type Elem;
+    fn insert(&mut self, elem: Self::Elem);
+}
+
+impl<T> Insert for Vec<T> {
+    type Elem = T;
+
+    fn insert(&mut self, elem: Self::Elem) {
+        self.push(elem);
+    }
+}
+
+impl<K, V> Insert for HashMap<K, V>
+where
+    K: std::hash::Hash + Eq,
+{
+    type Elem = (K, V);
+
+    fn insert(&mut self, (k, v): Self::Elem) {
+        HashMap::insert(self, k, v);
+    }
+}
+
+struct Collect<C>(PhantomData<C>);
+
+impl<C, T> Collector<T> for Collect<C>
+where
+    C: Default + Insert<Elem = T>,
+{
+    type Container = C;
+
+    fn consume(&self, container: &mut Self::Container, elem: T) {
+        container.insert(elem);
+    }
+}
+
+impl<C, T, D> DelimitedCollector<T, D> for Collect<C>
+where
+    C: Default + Insert<Elem = T>,
+{
+    type Container = C;
+
+    fn from(&self, elem: T) -> Self::Container {
+        let mut empty = C::default();
+        empty.insert(elem);
+        empty
+    }
+
+    fn consume(&mut self, mut container: Self::Container, _delim: D, elem: T) -> Self::Container {
+        container.insert(elem);
+        container
+    }
+}
+
+fn collect<C>() -> Collect<C>
+where
+    C: Default + Insert,
+{
+    Collect(PhantomData)
 }
 
 impl<T> Collector<T> for ToVec {
     type Container = Vec<T>;
 
-    fn consume(container: &mut Self::Container, elem: T) {
+    fn consume(&self, container: &mut Self::Container, elem: T) {
         container.push(elem);
     }
 }
@@ -133,7 +179,7 @@ impl<T> Collector<T> for ToVec {
 impl<T> Collector<T> for Ignore {
     type Container = ();
 
-    fn consume(_container: &mut Self::Container, _elem: T) {}
+    fn consume(&self, _container: &mut Self::Container, _elem: T) {}
 }
 
 pub trait DelimitedCollector<T, D> {
@@ -301,7 +347,7 @@ pub trait Parser<Err, Ctx = ()> {
 
     fn rep<Coll>(
         self,
-        _coll: Coll,
+        coll: Coll,
     ) -> impl for<'a> Parser<
         Err,
         Ctx,
@@ -314,7 +360,7 @@ pub trait Parser<Err, Ctx = ()> {
     {
         struct Repeat<P, Coll> {
             p: P,
-            phantom: PhantomData<Coll>,
+            coll: Coll,
         }
 
         impl<P, E, C, Coll> Parser<E, C> for Repeat<P, Coll>
@@ -334,16 +380,13 @@ pub trait Parser<Err, Ctx = ()> {
                 let mut elems = Coll::Container::default();
                 while let Some((len, elem)) = self.p.parse(input.skip(offset), errs.clone(), ctx) {
                     offset += len;
-                    Coll::consume(&mut elems, elem);
+                    self.coll.consume(&mut elems, elem);
                 }
                 Some((offset, elems))
             }
         }
 
-        Repeat {
-            p: self,
-            phantom: PhantomData::<Coll>,
-        }
+        Repeat { p: self, coll }
     }
 
     fn or<P>(
@@ -1185,14 +1228,17 @@ impl Parser<ParserError, ()> for Int {
     }
 }
 
-impl<const N: usize> Parser<ParserError, ()> for [char; N] {
+impl<E> Parser<E, ()> for &'static [char]
+where
+    E: From<ParserError>,
+{
     type Output<'a> = char;
     type Kind = Keep;
 
     fn parse<'a>(
         &mut self,
         input: Input<'a>,
-        _errs: impl ErrorHandler<ParserError>,
+        errs: impl ErrorHandler<E>,
         _ctx: Context<()>,
     ) -> ParserResult<Self::Output<'a>> {
         let c = input.slice().chars().next();
@@ -1201,6 +1247,7 @@ impl<const N: usize> Parser<ParserError, ()> for [char; N] {
         {
             Some((c.len_utf8(), c))
         } else {
+            errs.error(ParserError::ExpectedSymbol(self), input.cur..input.cur);
             None
         }
     }
@@ -1284,21 +1331,21 @@ macro_rules! parser_fn {
         #[allow(non_camel_case_types)]
         struct $name;
 
-        impl Parser<err_type!($($err_ret)?), ()> for $name {
+        impl<E> Parser<E, ()> for $name where E: From<err_type!($($err_ret)?)> {
             type Output<'a> = $ret;
             type Kind = Keep;
 
             fn parse<'a>(
                 &mut self,
                 input: Input<'a>,
-                errs: impl ErrorHandler<err_type!($($err_ret)?)>,
+                errs: impl ErrorHandler<E>,
                 ctx: &mut (),
             ) -> ParserResult<$ret> {
-                let (__len, val) = map_or_try_map!(
+                let (__len, val) = Parser::<err_type!($($err_ret)?), _>::parse(&mut map_or_try_map!(
                     $($err_ret)? |
                     p!($(not_drop!($parser $(, $match_name)?)),*) ;
                     names_pattern!($($($match_name ,)?)*) => $block
-                ).parse(input, errs, ctx)?;
+                ), input, &|e, r| errs.error(e, r), ctx)?;
                 Some((__len, val))
             }
         }
@@ -1307,17 +1354,17 @@ macro_rules! parser_fn {
         #[allow(non_camel_case_types)]
         $vis struct $name;
 
-        impl Parser<err_type!($($($err_ret)?)?), ()> for $name {
+        impl<E> Parser<E, ()> for $name where E: From<err_type!($($($err_ret)?)?)> {
             type Output<'a> = ret_type!($($ret)?);
             type Kind = keep_type!($($ret)?);
 
             fn parse<'a>(
                 &mut self,
                 input: Input<'a>,
-                errs: impl ErrorHandler<err_type!($($($err_ret)?)?)>,
+                errs: impl ErrorHandler<E>,
                 ctx: &mut (),
             ) -> ParserResult<ret_type!($($ret)?)> {
-                let (__len, val) = Parser::parse(&mut p!($($parser),*), input, errs, ctx)?;
+                let (__len, val) = Parser::<err_type!($($($err_ret)?)?), _>::parse(&mut p!($($parser),*), input, &|e, r| errs.error(e, r), ctx)?;
                 Some((__len, val))
             }
         }
@@ -1355,9 +1402,9 @@ parser_fns! {
 
     op(pmatch! {
         "+" => Operation::Add,
-        "-" => Operation::Mul,
+        "-" => Operation::Sub,
         "/" => Operation::Div,
-        "*" => Operation::Sub,
+        "*" => Operation::Mul,
     }) -> Operation;
 
     add(mul.delim_by(['+', '-'].lookahead().then(op).pad(sep), lfold(operate))) -> i64;
@@ -1397,11 +1444,10 @@ parser_fns! {
         "false" => JSONValue::Bool(false),
     }) -> JSONValue;
 
-    List(Value.delim_by(",".pad(sep), ToVec).wrapped("[", "]").map(JSONValue::List)) -> JSONValue;
+    List(Value.delim_by(",".pad(sep), ToVec).pad(sep).wrapped("[", "]").map(JSONValue::List)) -> JSONValue;
 
-    Map(@v=Str.then(":".pad(sep).then(Value)).delim_by(",".pad(sep), ToVec).wrapped("{", "}")) -> JSONValue {
-        JSONValue::Map(v.into_iter().collect())
-    };
+    MapEntry(Str.then(":".pad(sep)).then(Value)) -> (String, JSONValue);
+    Map(MapEntry.delim_by(",".pad(sep), collect()).map(JSONValue::Map).pad(sep).wrapped("{", "}")) -> JSONValue;
 
     pub Value(List.or(Map).or(Bool).or(Float).or(Int.map(JSONValue::Int)).or(Null).or(Str.map(JSONValue::String))) -> JSONValue;
 }
@@ -1424,14 +1470,15 @@ impl From<ParserError> for MyError {
 }
 
 parser_fns! {
-    Int2(@s="-".opt().then(Digits).slice()) -> i64, MyError {
-        s.parse()
-    };
     Int3("-".opt().then(Digits).slice().try_map(str::parse)) -> i64, MyError;
+    Thing("") -> (), MyError;
 }
+
+pub type MatchResult<T, E> = Result<T, Option<ErrorLocation<E>>>;
 
 #[test]
 fn thing() {
-    let val = Value.try_match("[1, 2, 3]");
-    assert_eq!(JSONValue::Null, val.unwrap());
+    let input = "[1, 2, 3, 4]";
+    let val: MatchResult<JSONValue, ParserError> = Value.try_match(input);
+    println!("{:?}", val.unwrap());
 }

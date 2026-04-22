@@ -6,6 +6,8 @@ pub enum ParserError {
     ExpectedLiteral(&'static str, &'static str),
     /// Thrown when an unspecified parsing operation associated with a named parser fails.
     ExpectedToken(&'static str),
+    /// Expected one of a set of symbols
+    ExpectedSymbol(&'static [char]),
     /// Thrown when a parsing operation expected to not find a specific value
     IllegalToken(&'static str),
     /// Thrown when a delimiter, such as a paren, is opened but never closed
@@ -29,6 +31,7 @@ impl Display for ParserError {
             ParserError::UnexpectedToken => write!(f, "Unexpected token"),
             ParserError::UnmatchedDelimiter(delim) => write!(f, "Unmatched delimiter '{delim}'"),
             ParserError::IllegalToken(token) => write!(f, "Illegal token while parsing '{token}'"),
+            ParserError::ExpectedSymbol(items) => write!(f, "Expected one of {items:?}"),
         }
     }
 }
