@@ -3,7 +3,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     marker::PhantomData,
-    num::ParseIntError,
+    num::{ParseFloatError, ParseIntError},
     ops::{Range, RangeFull, RangeInclusive},
 };
 
@@ -1238,29 +1238,6 @@ where
     }
 }
 
-struct Int;
-impl Parser<ParserError, ()> for Int {
-    type Output<'a> = i64;
-    type Kind = Keep;
-    fn parse(
-        &mut self,
-        input: Input,
-        _errs: impl ErrorHandler<ParserError>,
-        _ctx: Context<()>,
-    ) -> ParserResult<Self::Output<'_>> {
-        let bytes = input
-            .slice()
-            .chars()
-            .take_while(|c| c.is_ascii_digit())
-            .count();
-        let digits = &input.slice()[..bytes];
-        let Ok(num) = digits.parse() else {
-            return None;
-        };
-        Some((bytes, num))
-    }
-}
-
 impl<E> Parser<E, ()> for &'static [char]
 where
     E: From<ParserError>,
@@ -1352,7 +1329,7 @@ macro_rules! keep_type {
 
 macro_rules! map_or_try_map {
     ($err_typ:ty | $parser:expr ; $names_pat:pat => $block:block) => {
-        $parser.try_map(|$names_pat| $block)
+        $parser.try_map::<_, _, $err_typ>(|$names_pat| $block)
     };
     (| $parser:expr ; $names_pat:pat => $block:block) => {
         $parser.map(|$names_pat| $block)
@@ -1432,6 +1409,7 @@ enum Operation {
 
 parser_fns! {
     sep(char::is_whitespace.drop().rep(Ignore).opt());
+    int(('0'..='9').rep(Ignore).slice().map(|s| s.parse().unwrap())) -> i64;
 
     op(pmatch! {
         "+" => Operation::Add,
@@ -1443,7 +1421,7 @@ parser_fns! {
     add(mul.delim_by(['+', '-'].lookahead().then(op).pad(sep), lfold(operate))) -> i64;
     mul(term.delim_by(['*', '/'].lookahead().then(op).pad(sep), lfold(operate))) -> i64;
     neg('-', sep, term.map(|i| -i)) -> i64;
-    term(neg.or(Int).or(expr.pad(sep).wrapped("(", ")"))) -> i64;
+    term(neg.or(int).or(expr.pad(sep).wrapped("(", ")"))) -> i64;
 
     pub expr(add) -> i64;
 }
@@ -1464,54 +1442,64 @@ parser_fns! {
 
     EscapeSeq('\\', ..) -> char;
 
-    Str('"', @s=EscapeSeq.or(StrChar).rep(Ignore).slice(), '"') -> String { s.to_string() };
+    Str('"', EscapeSeq.or(StrChar).rep(Ignore).slice().map(ToOwned::to_owned), '"') -> String;
 
     Null("null") -> JSONValue { JSONValue::Null };
 
     Digits(('0'..='9').rep(Ignore));
 
-    Float(@i=p!("-".opt(), Digits, ".".then(Digits)).slice()) -> JSONValue { JSONValue::Float(i.parse().unwrap()) };
+    Int("-".opt().then(Digits).slice().try_map(str::parse).map(JSONValue::Int)) -> JSONValue, JSONError;
+    Float(p!("-".opt(), Digits, ".", Digits).slice().try_map(str::parse).map(JSONValue::Float)) -> JSONValue, JSONError;
 
     Bool(pmatch!{
         "true" => JSONValue::Bool(true),
         "false" => JSONValue::Bool(false),
     }) -> JSONValue;
 
-    List(Value.delim_by(",".pad(sep), ToVec).pad(sep).wrapped("[", "]").map(JSONValue::List)) -> JSONValue;
+    List(Value.delim_by(",".pad(sep), ToVec).pad(sep).wrapped("[", "]").map(JSONValue::List)) -> JSONValue, JSONError;
 
-    MapEntry(Str.then(":".pad(sep)).then(Value)) -> (String, JSONValue);
-    Map(MapEntry.delim_by(",".pad(sep), collect()).map(JSONValue::Map).pad(sep).wrapped("{", "}")) -> JSONValue;
+    MapEntry(Str.then(":".pad(sep)).then(Value)) -> (String, JSONValue), JSONError;
+    Map(MapEntry.delim_by(",".pad(sep), collect()).map(JSONValue::Map).pad(sep).wrapped("{", "}")) -> JSONValue, JSONError;
 
-    pub Value(List.or(Map).or(Bool).or(Float).or(Int.map(JSONValue::Int)).or(Null).or(Str.map(JSONValue::String))) -> JSONValue;
+    pub Value(List.or(Map).or(Bool).or(Float).or(Int).or(Null).or(Str.map(JSONValue::String))) -> JSONValue, JSONError;
 }
 
-enum MyError {
+#[derive(Debug)]
+enum JSONError {
     Int(ParseIntError),
+    Float(ParseFloatError),
     Parse(ParserError),
 }
 
-impl From<ParseIntError> for MyError {
+impl From<ParseIntError> for JSONError {
     fn from(value: ParseIntError) -> Self {
-        MyError::Int(value)
+        JSONError::Int(value)
     }
 }
 
-impl From<ParserError> for MyError {
+impl From<ParseFloatError> for JSONError {
+    fn from(value: ParseFloatError) -> Self {
+        JSONError::Float(value)
+    }
+}
+
+impl From<ParserError> for JSONError {
     fn from(value: ParserError) -> Self {
-        MyError::Parse(value)
+        JSONError::Parse(value)
     }
 }
 
 parser_fns! {
-    Int3("-".opt().then(Digits).slice().try_map(str::parse)) -> i64, MyError;
-    Thing("") -> (), MyError;
+    Int3("-".opt().then(Digits).slice().try_map(str::parse)) -> i64, JSONError;
+    Thing("") -> (), JSONError;
 }
 
 pub type MatchResult<T, E> = Result<T, Option<ErrorLocation<E>>>;
 
 #[test]
 fn thing() {
-    let input = "[1, 2, 3, 4]";
-    let val: MatchResult<JSONValue, ParserError> = Value.try_match(input);
+    let input = "\"hello\"";
+    let val: MatchResult<JSONValue, JSONError> = Value.try_match(input);
     println!("{:?}", val.unwrap());
+    panic!();
 }
