@@ -4,7 +4,7 @@ use std::{
     fmt::Debug,
     marker::PhantomData,
     num::ParseIntError,
-    ops::{Range, RangeInclusive},
+    ops::{Range, RangeFull, RangeInclusive},
 };
 
 use crate::ParserError;
@@ -1166,38 +1166,71 @@ where
     }
 }
 
-impl Parser<ParserError, ()> for char {
+impl<E> Parser<E, ()> for char
+where
+    E: From<ParserError>,
+{
     type Output<'a> = ();
     type Kind = Ignore;
 
     fn parse<'a>(
         &mut self,
         input: Input<'a>,
-        _errs: impl ErrorHandler<ParserError>,
+        errs: impl ErrorHandler<E>,
         _ctx: Context<()>,
     ) -> ParserResult<Self::Output<'a>> {
         if input.slice().starts_with(*self) {
             Some((self.len_utf8(), ()))
         } else {
+            errs.error(ParserError::ExpectedChar(*self), input.cur..input.cur);
             None
         }
     }
 }
 
-impl Parser<ParserError, ()> for RangeInclusive<char> {
+impl<E> Parser<E, ()> for RangeInclusive<char>
+where
+    E: From<ParserError>,
+{
     type Output<'a> = char;
     type Kind = Keep;
 
     fn parse<'a>(
         &mut self,
         input: Input<'a>,
-        _errs: impl ErrorHandler<ParserError>,
+        errs: impl ErrorHandler<E>,
         _ctx: Context<()>,
     ) -> ParserResult<Self::Output<'a>> {
         let c = input.slice().chars().next();
         if let Some(c) = c
             && self.contains(&c)
         {
+            Some((c.len_utf8(), c))
+        } else {
+            errs.error(
+                ParserError::ExpectedRange(self.clone()),
+                input.cur..input.cur,
+            );
+            None
+        }
+    }
+}
+
+impl<E> Parser<E, ()> for RangeFull
+where
+    E: From<ParserError>,
+{
+    type Output<'a> = char;
+    type Kind = Keep;
+
+    fn parse<'a>(
+        &mut self,
+        input: Input<'a>,
+        _errs: impl ErrorHandler<E>,
+        _ctx: Context<()>,
+    ) -> ParserResult<Self::Output<'a>> {
+        let c = input.slice().chars().next();
+        if let Some(c) = c {
             Some((c.len_utf8(), c))
         } else {
             None
@@ -1429,7 +1462,7 @@ pub enum JSONValue {
 parser_fns! {
     StrChar((|c: char| c != '"' && c != '\\')) -> char;
 
-    EscapeSeq('\\', |_| true) -> char;
+    EscapeSeq('\\', ..) -> char;
 
     Str('"', @s=EscapeSeq.or(StrChar).rep(Ignore).slice(), '"') -> String { s.to_string() };
 

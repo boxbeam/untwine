@@ -1,6 +1,6 @@
 # Untwine
 
-## 🧪 PARSE LIKE PATTERN MATCHING, FREE OF SYN
+## 🧪 PARSE LIKE A GENERATOR, FREE OF SYN
 
 ![Example expression errors](./screenshots/json-3.png)
 

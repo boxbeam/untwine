@@ -1,13 +1,17 @@
-use std::{error::Error, fmt::Display};
+use std::{error::Error, fmt::Display, ops::RangeInclusive};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParserError {
     /// Thrown when a literal substring is expected.
     ExpectedLiteral(&'static str, &'static str),
+    /// Thrown when a literal character is expected.
+    ExpectedChar(char),
     /// Thrown when an unspecified parsing operation associated with a named parser fails.
     ExpectedToken(&'static str),
-    /// Expected one of a set of symbols
+    /// Thrown when one of a set of symbols is expected
     ExpectedSymbol(&'static [char]),
+    /// Thrown when one of a set of symbols is expected
+    ExpectedRange(RangeInclusive<char>),
     /// Thrown when a parsing operation expected to not find a specific value
     IllegalToken(&'static str),
     /// Thrown when a delimiter, such as a paren, is opened but never closed
@@ -32,6 +36,10 @@ impl Display for ParserError {
             ParserError::UnmatchedDelimiter(delim) => write!(f, "Unmatched delimiter '{delim}'"),
             ParserError::IllegalToken(token) => write!(f, "Illegal token while parsing '{token}'"),
             ParserError::ExpectedSymbol(items) => write!(f, "Expected one of {items:?}"),
+            ParserError::ExpectedChar(c) => write!(f, "Expected '{c}'"),
+            ParserError::ExpectedRange(range_inclusive) => {
+                write!(f, "Expected symbol in {range_inclusive:?}")
+            }
         }
     }
 }
