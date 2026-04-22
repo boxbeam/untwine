@@ -102,6 +102,7 @@ struct ToVec;
 
 pub trait Collector<T> {
     type Container: Default;
+    type Kind;
 
     fn consume(&self, container: &mut Self::Container, elem: T);
 }
@@ -137,6 +138,7 @@ where
     C: Default + Insert<Elem = T>,
 {
     type Container = C;
+    type Kind = Keep;
 
     fn consume(&self, container: &mut Self::Container, elem: T) {
         container.insert(elem);
@@ -148,6 +150,7 @@ where
     C: Default + Insert<Elem = T>,
 {
     type Container = C;
+    type Kind = Keep;
 
     fn from(&self, elem: T) -> Self::Container {
         let mut empty = C::default();
@@ -170,6 +173,7 @@ where
 
 impl<T> Collector<T> for ToVec {
     type Container = Vec<T>;
+    type Kind = Keep;
 
     fn consume(&self, container: &mut Self::Container, elem: T) {
         container.push(elem);
@@ -178,18 +182,21 @@ impl<T> Collector<T> for ToVec {
 
 impl<T> Collector<T> for Ignore {
     type Container = ();
+    type Kind = Ignore;
 
     fn consume(&self, _container: &mut Self::Container, _elem: T) {}
 }
 
 pub trait DelimitedCollector<T, D> {
     type Container;
+    type Kind;
     fn from(&self, elem: T) -> Self::Container;
     fn consume(&mut self, container: Self::Container, delim: D, elem: T) -> Self::Container;
 }
 
 impl<'a, T, D> DelimitedCollector<T, D> for ToVec {
     type Container = Vec<T>;
+    type Kind = Keep;
     fn consume(&mut self, mut container: Self::Container, _delim: D, elem: T) -> Self::Container {
         container.push(elem);
         container
@@ -202,6 +209,7 @@ impl<'a, T, D> DelimitedCollector<T, D> for ToVec {
 
 impl<'a, T, D> DelimitedCollector<T, D> for Ignore {
     type Container = ();
+    type Kind = Ignore;
     fn consume(&mut self, _container: Self::Container, _delim: D, _elem: T) -> Self::Container {
         ()
     }
@@ -225,6 +233,7 @@ where
         F: FnMut(Elem, Delim, Elem) -> Elem,
     {
         type Container = Elem;
+        type Kind = Keep;
 
         fn from(&self, elem: Elem) -> Self::Container {
             elem
@@ -345,30 +354,31 @@ pub trait Parser<Err, Ctx = ()> {
         }
     }
 
-    fn rep<Coll>(
+    fn rep<Coll, K>(
         self,
         coll: Coll,
     ) -> impl for<'a> Parser<
         Err,
         Ctx,
         Output<'a> = <Coll as Collector<Self::Output<'a>>>::Container,
-        Kind = Self::Kind,
+        Kind = K,
     >
     where
         Self: Sized,
-        Coll: for<'a> Collector<Self::Output<'a>>,
+        Coll: for<'a> Collector<Self::Output<'a>, Kind = K>,
     {
-        struct Repeat<P, Coll> {
+        struct Repeat<P, Coll, K> {
             p: P,
             coll: Coll,
+            phantom: PhantomData<K>,
         }
 
-        impl<P, E, C, Coll> Parser<E, C> for Repeat<P, Coll>
+        impl<P, E, C, Coll, K> Parser<E, C> for Repeat<P, Coll, K>
         where
             P: Parser<E, C>,
-            Coll: for<'a> Collector<P::Output<'a>>,
+            Coll: for<'a> Collector<P::Output<'a>, Kind = K>,
         {
-            type Kind = P::Kind;
+            type Kind = K;
             type Output<'a> = <Coll as Collector<P::Output<'a>>>::Container;
             fn parse<'a>(
                 &mut self,
@@ -386,7 +396,11 @@ pub trait Parser<Err, Ctx = ()> {
             }
         }
 
-        Repeat { p: self, coll }
+        Repeat {
+            p: self,
+            coll,
+            phantom: PhantomData,
+        }
     }
 
     fn or<P>(
@@ -604,7 +618,7 @@ pub trait Parser<Err, Ctx = ()> {
         Slice { p: self }
     }
 
-    fn delim_by<P, Coll>(
+    fn delim_by<P, Coll, K>(
         self,
         delim: P,
         collect: Coll,
@@ -612,27 +626,29 @@ pub trait Parser<Err, Ctx = ()> {
         Err,
         Ctx,
         Output<'a> = <Coll as DelimitedCollector<Self::Output<'a>, P::Output<'a>>>::Container,
+        Kind = K,
     >
     where
         P: Parser<Err, Ctx>,
         Self: Sized,
-        Coll: for<'a> DelimitedCollector<Self::Output<'a>, P::Output<'a>>,
+        Coll: for<'a> DelimitedCollector<Self::Output<'a>, P::Output<'a>, Kind = K>,
     {
-        struct DelimBy<P1, P2, Coll> {
+        struct DelimBy<P1, P2, Coll, K> {
             elem: P1,
             delim: P2,
             coll: Coll,
+            phantom: PhantomData<K>,
         }
 
-        impl<P1, P2, Coll, E, C> Parser<E, C> for DelimBy<P1, P2, Coll>
+        impl<P1, P2, Coll, E, C, K> Parser<E, C> for DelimBy<P1, P2, Coll, K>
         where
             P1: Parser<E, C>,
             P2: Parser<E, C>,
-            Coll: for<'a> DelimitedCollector<P1::Output<'a>, P2::Output<'a>>,
+            Coll: for<'a> DelimitedCollector<P1::Output<'a>, P2::Output<'a>, Kind = K>,
         {
             type Output<'a> =
                 <Coll as DelimitedCollector<P1::Output<'a>, P2::Output<'a>>>::Container;
-            type Kind = Keep;
+            type Kind = K;
 
             fn parse<'a>(
                 &mut self,
@@ -664,6 +680,7 @@ pub trait Parser<Err, Ctx = ()> {
             elem: self,
             delim,
             coll: collect,
+            phantom: PhantomData,
         }
     }
 
@@ -1408,7 +1425,7 @@ enum Operation {
 }
 
 parser_fns! {
-    sep(char::is_whitespace.drop().rep(Ignore).opt());
+    sep(char::is_whitespace.rep(Ignore).opt());
     int(('0'..='9').rep(Ignore).slice().map(|s| s.parse().unwrap())) -> i64;
 
     op(pmatch! {
