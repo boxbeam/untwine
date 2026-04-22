@@ -1460,7 +1460,7 @@ pub enum JSONValue {
 }
 
 parser_fns! {
-    StrChar((|c: char| c != '"' && c != '\\')) -> char;
+    StrChar(['"', '\\'].not().then(..)) -> char;
 
     EscapeSeq('\\', ..) -> char;
 
