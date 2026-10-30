@@ -1,3 +1,7 @@
+## 0.9.5
+- Fix context-sensitive parsing example
+- Fix miscounting bytes in literal parsers
+
 ## 0.9.4
 - Fix lone statements in parser bodies causing syntax errors if not followed by a return value in the next line
 - Add example `indent` to demonstrate context-sensitive parsing
