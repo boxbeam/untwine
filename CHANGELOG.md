@@ -1,3 +1,6 @@
+## 0.9.6
+- Remove unused refactor source tree
+
 ## 0.9.5
 - Fix context-sensitive parsing example
 - Fix miscounting bytes in literal parsers
